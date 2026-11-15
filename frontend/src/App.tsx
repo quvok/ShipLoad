@@ -116,7 +116,7 @@ function App() {
               </div>
             </>
           )}
-          <div className="bottom-note"><span>SHIPLOAD</span><span>Прослеживаемость данных · Повторяемость расчётов · Явный статус проверки</span><span>v0.2.0</span></div>
+          <div className="bottom-note"><span>SHIPLOAD</span><span>Прослеживаемость данных · Повторяемость расчётов · Явный статус проверки</span><span>v0.3.0</span></div>
         </section>
       </main>
     </div>
@@ -246,7 +246,7 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
     </section>
     <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ИСТОРИЯ</div><h2>Сохранённые условия</h2></div></div>
       {!vesselId ? <div className="empty-state"><p>Выберите судно, чтобы просмотреть его загрузочные условия.</p></div> : records.length === 0 ? <div className="empty-state"><strong>Записей пока нет</strong><p>Создайте первое черновое загрузочное условие.</p></div> :
-      <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Версия данных</th><th>Строк нагрузки</th><th>Статус</th></tr></thead><tbody>{records.map(record => <tr key={record.id}><td><strong>{record.name}</strong><small>{record.id}</small></td><td>{record.status}</td><td>{record.item_count}</td><td><span className="draft-tag">{record.status}</span></td></tr>)}</tbody></table></div>}
+      <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Версия данных</th><th>Строк нагрузки</th><th>Статус</th></tr></thead><tbody>{records.map(record => <tr key={record.id}><td><strong>{record.name}</strong><small>{record.id}</small></td><td>{record.vessel_data_revision}</td><td>{record.item_count}</td><td><span className="draft-tag">{record.status}</span></td></tr>)}</tbody></table></div>}
     </section>
   </>;
 }
