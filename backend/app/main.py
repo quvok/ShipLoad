@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import LoadingConditionRecord, LoadingItemRecord, VesselRecord
+from app.models import LoadingConditionRecord, LoadingItemRecord, TankRecord, VesselRecord
 from app.schemas.loading import LoadingConditionCreate
+from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
 
 app = FastAPI(
@@ -73,6 +74,64 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
     return record
 
 
+@app.post(
+    "/api/v1/vessels/{vessel_id}/tanks",
+    response_model=TankRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["tanks"],
+)
+def create_tank(
+    vessel_id: str,
+    tank: TankCreate,
+    session: Annotated[Session, Depends(get_session)],
+) -> TankRecord:
+    vessel = session.get(VesselRecord, vessel_id)
+    if vessel is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    duplicate = session.scalar(
+        select(TankRecord).where(
+            TankRecord.vessel_id == vessel_id,
+            TankRecord.tank_code == tank.tank_code,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Такой идентификатор танка уже зарегистрирован")
+    record = TankRecord(
+        vessel_id=vessel_id,
+        tank_code=tank.tank_code,
+        name=tank.name,
+        tank_type=tank.tank_type.value,
+        nominal_capacity_m3=tank.nominal_capacity_m3,
+        arrangement_source_reference=tank.arrangement_source_reference,
+        capacity_source_reference=tank.capacity_source_reference,
+        data_status="REVIEW_REQUIRED",
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+@app.get(
+    "/api/v1/vessels/{vessel_id}/tanks",
+    response_model=list[TankRead],
+    tags=["tanks"],
+)
+def list_tanks(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> list[TankRecord]:
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    return list(
+        session.scalars(
+            select(TankRecord)
+            .where(TankRecord.vessel_id == vessel_id)
+            .order_by(TankRecord.tank_code)
+        )
+    )
+
+
 def _condition_summary(record: LoadingConditionRecord) -> dict[str, object]:
     return {
         "id": record.id,
@@ -94,6 +153,29 @@ def create_loading_condition(
     vessel = session.get(VesselRecord, condition.vessel_id)
     if vessel is None:
         raise HTTPException(status_code=404, detail="Судно не найдено")
+
+    tank_type_by_item_kind = {
+        "ballast": "ballast",
+        "fuel_oil": "fuel_oil",
+        "diesel_oil": "diesel_oil",
+        "fresh_water": "fresh_water",
+        "lubricating_oil": "lubricating_oil",
+    }
+    for item in condition.items:
+        if item.tank_id is None:
+            continue
+        tank = session.get(TankRecord, item.tank_id)
+        if tank is None or tank.vessel_id != condition.vessel_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Танк для нагрузки {item.item_id} не найден в выбранном судне",
+            )
+        expected_tank_type = tank_type_by_item_kind.get(item.kind.value)
+        if expected_tank_type is not None and tank.tank_type != expected_tank_type:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Тип танка не соответствует типу нагрузки {item.item_id}",
+            )
 
     record = LoadingConditionRecord(
         vessel_id=condition.vessel_id,
