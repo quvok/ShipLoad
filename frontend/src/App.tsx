@@ -194,19 +194,6 @@ function TanksPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checki
     void loadTanks(vesselId).catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка загрузки реестра."));
   }, [vesselId, loadTanks]);
 
-  useEffect(() => {
-    if (!vesselId) { setTankOptions([]); return; }
-    let cancelled = false;
-    fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/tanks`)
-      .then(async response => {
-        if (!response.ok) throw new Error("Не удалось получить реестр танков.");
-        return await response.json() as Tank[];
-      })
-      .then(data => { if (!cancelled) setTankOptions(data); })
-      .catch(() => { if (!cancelled) setTankOptions([]); });
-    return () => { cancelled = true; };
-  }, [vesselId]);
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true); setError(""); setNotice("");
@@ -287,6 +274,19 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       })
       .then(data => { if (!cancelled) setRecords(data); })
       .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Ошибка загрузки."); });
+    return () => { cancelled = true; };
+  }, [vesselId]);
+
+  useEffect(() => {
+    if (!vesselId) { setTankOptions([]); return; }
+    let cancelled = false;
+    fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/tanks`)
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось получить реестр танков.");
+        return await response.json() as Tank[];
+      })
+      .then(data => { if (!cancelled) setTankOptions(data); })
+      .catch(() => { if (!cancelled) setTankOptions([]); });
     return () => { cancelled = true; };
   }, [vesselId]);
 
