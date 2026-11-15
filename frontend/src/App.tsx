@@ -288,6 +288,39 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       setError(cause instanceof Error ? cause.message : "Ошибка при проверке кандидата.");
     } finally { setReviewingCandidate(null); }
   }
+  async function approveAllCandidates() {
+    const pending = candidates.filter(item => item.review_status === "PENDING");
+    if (!pending.length) return;
+    if (reviewerLabel.trim().length < 2) {
+      setError("Укажите имя или должность проверяющего (не менее 2 символов).");
+      return;
+    }
+    const items = pending.map(item => ({
+      candidate_index: item.candidate_index,
+      approved_value: Number(correctedValues[item.candidate_index] ?? item.value),
+    }));
+    if (items.some(item => !Number.isFinite(item.approved_value) || item.approved_value <= 0)) {
+      setError("Проверьте все значения перед пакетным подтверждением.");
+      return;
+    }
+    setReviewingCandidate(-1); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates/approve-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer_label: reviewerLabel.trim(), items }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось пакетно подтвердить кандидаты.");
+      const refreshed = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates`);
+      if (!refreshed.ok) throw new Error("Ревизия сохранена, но список кандидатов не обновился.");
+      const data = await refreshed.json() as { candidates: ExtractedCandidate[] };
+      setCandidates(data.candidates);
+      setMessage(body.message);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ошибка пакетного подтверждения.");
+    } finally { setReviewingCandidate(null); }
+  }
   const selected = documents.find(doc => doc.id === selectedDocument);
   return <>
     <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите один PDF. Система анализирует весь документ и формирует обзор найденных разделов и значений с привязкой к страницам.</p></div></div>
@@ -342,6 +375,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       </div>}
       {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
+        <div className="form-actions"><button className="primary-button" type="button" disabled={reviewingCandidate !== null || !candidates.some(item => item.review_status === "PENDING")} onClick={() => void approveAllCandidates()}>Подтвердить все ожидающие одной ревизией</button><span className="form-hint">Перед нажатием сверьте каждое значение и все указанные страницы с оригиналом.</span></div>
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат / подтверждено, м</th><th>Страницы</th><th>Фрагменты источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
           <td>{candidateLabels[item.field] ?? item.field}</td>
           <td>{item.review_status === "PENDING" ? <input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} /> : <strong>{(item.decision?.approved_value ?? item.value).toFixed(3)}</strong>}</td>
