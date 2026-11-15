@@ -229,3 +229,100 @@ def test_candidate_review_rejects_blank_reviewer_label():
         json={"decision": "APPROVE", "reviewer_label": "   "},
     )
     assert response.status_code == 422
+
+def test_batch_candidate_approval_creates_one_immutable_revision():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Batch review vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/approve-batch",
+        json={
+            "reviewer_label": "Старший помощник",
+            "items": [
+                {"candidate_index": 0, "approved_value": 124.0},
+                {"candidate_index": 1, "approved_value": 112.0},
+            ],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["revision_number"] == 1
+    assert response.json()["approved_count"] == 2
+
+    revisions = client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json()
+    assert len(revisions) == 1
+    assert revisions[0]["values"]["loa_m"] == 124.0
+    assert revisions[0]["values"]["lbp_m"] == 112.0
+
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert [item["decision"]["revision_number"] for item in candidates] == [1, 1]
+
+
+def test_batch_candidate_approval_is_atomic_when_values_are_inconsistent():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Batch review vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/approve-batch",
+        json={
+            "reviewer_label": "Проверяющий",
+            "items": [
+                {"candidate_index": 0, "approved_value": 100.0},
+                {"candidate_index": 1, "approved_value": 111.0},
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json() == []
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert all(item["review_status"] == "PENDING" for item in candidates)
+
+
+def test_reviewed_duplicate_candidates_are_grouped_without_losing_audit_history():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Duplicate evidence vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = "00000000-0000-0000-0000-000000000456"
+    session = TestingSession()
+    try:
+        session.add(SourceDocumentRecord(
+            id=document_id,
+            vessel_id=vessel_id,
+            original_filename="particulars.pdf",
+            stored_filename="duplicate-evidence.pdf",
+            media_type="application/pdf",
+            size_bytes=100,
+            sha256="c" * 64,
+            document_type="ship_particulars",
+            extraction_status="TEXT_EXTRACTED",
+            extracted_candidates=[
+                {"field": "lbp_m", "value": 283.1, "unit": "m", "page": page,
+                 "matched_text": f"LBP 283.1 m, page {page}", "status": "EXTRACTED"}
+                for page in (2, 139, 140)
+            ],
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+    for index in range(3):
+        response = client.post(
+            f"/api/v1/documents/{document_id}/candidates/{index}/decision",
+            json={"decision": "APPROVE", "reviewer_label": "Старший помощник"},
+        )
+        assert response.status_code == 201
+
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["candidate_indices"] == [0, 1, 2]
+    assert [source["page"] for source in candidates[0]["evidence"]] == [2, 139, 140]
+    assert candidates[0]["decision"]["revision_numbers"] == [1, 2, 3]
+
+    documents = client.get(f"/api/v1/vessels/{vessel_id}/documents").json()
+    assert documents[0]["candidate_count"] == 1

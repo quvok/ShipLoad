@@ -1,5 +1,5 @@
 """Bounded, conservative extraction of tabular evidence from selected PDF pages."""
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import re
 from pathlib import Path
@@ -14,21 +14,85 @@ _PAGE_HINTS = re.compile(
     r"stability criteria|draft",
     re.IGNORECASE,
 )
-_KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASE)),
-    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASE)),
-    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASE)),
-    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASE)),
-    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASE)),
-)
+_KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "tank_capacity": (
+        re.compile(r"cargo tank|ballast tank|fuel tank|tank capacity|capacity plan", re.IGNORECASE),
+        re.compile(r"sounding|ullage|calibration", re.IGNORECASE),
+    ),
+    "strength": (
+        re.compile(r"shear force|bending moment|still water|longitudinal strength", re.IGNORECASE),
+    ),
+    "stability": (
+        re.compile(r"GZ curve|righting lever|heel angle|stability criteria|free surface moment|cross curve", re.IGNORECASE),
+    ),
+    "hydrostatics": (
+        re.compile(r"hydrostatic|waterplane", re.IGNORECASE),
+        re.compile(r"L\.?\s*C\.?\s*[BF]\.?|\bLCB\b|\bLCF\b|\bTPC\b|\bMCT\b|\bKM\b|\bKB\b", re.IGNORECASE),
+    ),
+    "loading_condition": (
+        re.compile(r"deadweight scale|loading condition|loading manual", re.IGNORECASE),
+        re.compile(r"deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
+    ),
+}
+_SPECIAL_KIND_PATTERNS: dict[str, re.Pattern[str]] = {
+    "free_surface": re.compile(
+        r"(?:tank name|cargo tank|ballast tank).{0,100}(?:F\.?\s*S\.?\s*M)|"
+        r"(?:F\.?\s*S\.?\s*M).{0,100}(?:T-M|tank)",
+        re.IGNORECASE,
+    ),
+    "draft_corrections": re.compile(
+        r"draft correction values|aft mark\s*[12].{0,80}mid mark.{0,80}fore mark",
+        re.IGNORECASE,
+    ),
+    "windage": re.compile(
+        r"lateral area.{0,100}heeling moment|wind pressure.{0,100}heeling moment",
+        re.IGNORECASE,
+    ),
+    "ice_loading": re.compile(
+        r"mass of ice|ice per square meter",
+        re.IGNORECASE,
+    ),
+    "inclining_experiment": re.compile(
+        r"inclining experiment|slope of tangent|pendulum reading",
+        re.IGNORECASE,
+    ),
+    "propeller_immersion": re.compile(
+        r"propeller immersion|\bdAp\s*=",
+        re.IGNORECASE,
+    ),
+    "trimming_table": re.compile(
+        r"trimming table|trim correction values",
+        re.IGNORECASE,
+    ),
+}
 _LABELS = {
     "hydrostatics": "Гидростатическая таблица",
     "tank_capacity": "Таблица танков / вместимостей",
     "stability": "Таблица остойчивости",
     "strength": "Таблица продольной прочности",
     "loading_condition": "Таблица загрузочного условия",
+    "free_surface": "Таблица моментов свободных поверхностей (FSM)",
+    "draft_corrections": "Таблица поправок осадки",
+    "windage": "Площадь парусности и ветровой момент",
+    "ice_loading": "Данные об обледенении",
+    "inclining_experiment": "Данные кренового опыта",
+    "propeller_immersion": "Расчёт погружения винта",
+    "trimming_table": "Таблица изменения осадки и дифферента",
     "other": "Таблица (тип не определён)",
 }
+
+
+def _classify_table(sample: str) -> str:
+    """Prefer distinctive operational subtypes over broad loading/stability labels."""
+    for kind, pattern in _SPECIAL_KIND_PATTERNS.items():
+        if pattern.search(sample):
+            return kind
+    scores = {
+        kind: sum(4 if index == 0 else 2 for index, pattern in enumerate(patterns) if pattern.search(sample))
+        for kind, patterns in _KIND_PATTERNS.items()
+    }
+    best_kind = max(scores, key=scores.get)
+    return best_kind if scores[best_kind] else "other"
 
 
 def _clean_cell(value: Any) -> str:
@@ -41,7 +105,7 @@ def extract_pdf_tables(
     pdf_path: str | Path,
     page_texts: list[tuple[int, str]],
     *,
-    max_candidate_pages: int = 40,
+    max_candidate_pages: int = 250,
     max_tables_per_page: int = 4,
     max_rows: int = 30,
     max_columns: int = 20,
@@ -79,13 +143,27 @@ def extract_pdf_tables(
                     continue
                 pages_checked.append(page_number)
                 try:
-                    found = page.extract_tables({
-                        "vertical_strategy": "lines",
-                        "horizontal_strategy": "lines",
-                        "intersection_tolerance": 5,
-                        "snap_tolerance": 4,
-                        "join_tolerance": 4,
-                    })
+                    strategies = (
+                        {
+                            "vertical_strategy": "lines",
+                            "horizontal_strategy": "lines",
+                            "intersection_tolerance": 5,
+                            "snap_tolerance": 4,
+                            "join_tolerance": 4,
+                        },
+                        {
+                            "vertical_strategy": "text",
+                            "horizontal_strategy": "text",
+                            "text_x_tolerance": 3,
+                            "text_y_tolerance": 3,
+                            "intersection_tolerance": 5,
+                        },
+                    )
+                    found = []
+                    for table_settings in strategies:
+                        found = page.extract_tables(table_settings)
+                        if found:
+                            break
                     # A table must have at least two non-empty rows and two columns.
                     for raw_table in found[:max_tables_per_page]:
                         rows = [
@@ -96,10 +174,7 @@ def extract_pdf_tables(
                         if len(rows) < 2 or max((len(row) for row in rows), default=0) < 2:
                             continue
                         sample = " ".join(cell for row in rows[:8] for cell in row)
-                        kind = next(
-                            (key for key, pattern in _KIND_HINTS if pattern.search(sample)),
-                            "other",
-                        )
+                        kind = _classify_table(sample)
                         tables.append({
                             "page": page_number,
                             "kind": kind,
@@ -109,12 +184,12 @@ def extract_pdf_tables(
                             "rows": rows,
                             "note": "Предпросмотр извлечённой таблицы; заголовки и значения требуют сверки с оригиналом.",
                         })
-                except Exception as exc:  # one malformed page must not abort the report
+                except Exception as exc:  # noqa: BLE001 — isolate malformed pages
                     page_errors.append({
                         "page": page_number,
                         "error": type(exc).__name__,
                     })
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — report parser failure without hiding it
         return {
             "status": "TABLE_EXTRACTION_FAILED",
             "candidate_pages": candidates,
@@ -130,7 +205,7 @@ def extract_pdf_tables(
     return {
         "status": "TABLE_PREVIEWS_FOUND" if tables else "NO_TABLE_PREVIEWS_FOUND",
         "candidate_pages": candidates,
-        "pages_checked": selected_pages,
+        "pages_checked": pages_checked,
         "pages_skipped_by_limit": skipped_pages,
         "pages_skipped_complex": pages_skipped_complex,
         "tables_found": len(tables),
@@ -139,6 +214,6 @@ def extract_pdf_tables(
         "note": (
             "Найдены табличные фрагменты. Это предварительное извлечение, а не проверенные судовые данные."
             if tables else
-            "На выбранных страницах не удалось выделить таблицы с помощью линейной структуры PDF. Таблицы без линий, изображения и сложные схемы могут быть пропущены."
+            "На выбранных страницах не удалось выделить таблицы ни по линиям, ни по текстовой структуре. Изображения и сложные схемы всё ещё требуют OCR/vision обработки."
         ),
     }

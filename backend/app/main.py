@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import (
+    CalculationRunRecord,
     DocumentCandidateDecisionRecord,
     LoadingConditionRecord,
     LoadingItemRecord,
@@ -26,16 +27,34 @@ from app.models import (
     VesselDataRevisionRecord,
     VesselRecord,
 )
+from app.schemas.calculation import LoadingCalculationRequest
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
+from app.services.dataset_coverage import build_dataset_coverage
+from app.services.document_calculation_import import (
+    SourceArtifact,
+    build_calculation_draft,
+    read_docx_tables,
+)
+from app.services.loading_calculations import (
+    CalculationInputError,
+    HydrostaticPoint,
+    KNPoint,
+    Lightship,
+    WeightItem,
+    calculate_gz_curve,
+    calculate_loading_condition,
+)
 from app.services.pdf_table_extractor import extract_pdf_tables
 from app.services.vessel_document_extractor import (
     build_extraction_report,
+    classify_document_type,
     extract_principal_particulars,
 )
 
 logger = logging.getLogger(__name__)
+_CALCULATION_ENGINE_VERSION = "stage-1.1"
 
 app = FastAPI(
     title="ShipLoad API",
@@ -61,6 +80,17 @@ app.add_middleware(
 )
 
 
+@app.get("/", tags=["system"])
+def root() -> dict[str, str]:
+    """Expose the service entry points instead of FastAPI's default 404."""
+    return {
+        "service": "shipload-api",
+        "health": "/health",
+        "status": "/api/v1/status",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "shipload-api"}
@@ -70,8 +100,8 @@ def health() -> dict[str, str]:
 def status_endpoint() -> dict[str, str]:
     return {
         "project": "ShipLoad",
-        "stage": "loading_condition_storage",
-        "calculation_engine": "not_implemented",
+        "stage": "preliminary_loading_calculation",
+        "calculation_engine": _CALCULATION_ENGINE_VERSION,
         "operational_approval": "not_approved",
     }
 
@@ -120,7 +150,8 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
 
 _DOCUMENT_STORAGE = Path(__file__).resolve().parents[1] / "data" / "documents"
 _MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
-_ALLOWED_DOCUMENT_TYPES = {"ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
+_DOCUMENT_ANALYSIS_VERSION = 2
+_ALLOWED_DOCUMENT_TYPES = {"auto", "ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
 
 
 @app.post(
@@ -132,7 +163,7 @@ async def upload_vessel_document(
     vessel_id: str,
     session: Annotated[Session, Depends(get_session)],
     file: Annotated[UploadFile, File()],
-    document_type: Annotated[str, Form()] = "other",
+    document_type: Annotated[str, Form()] = "auto",
 ) -> dict[str, object]:
     """Store an immutable PDF and extract traceable review candidates only."""
     if session.get(VesselRecord, vessel_id) is None:
@@ -140,13 +171,20 @@ async def upload_vessel_document(
     if document_type not in _ALLOWED_DOCUMENT_TYPES:
         raise HTTPException(status_code=422, detail="Неизвестный тип документа")
     original_name = Path(file.filename or "document.pdf").name[:255]
-    if Path(original_name).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=415, detail="Пока поддерживаются только PDF-документы")
+    suffix = Path(original_name).suffix.lower()
+    media_type = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }.get(suffix)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="Поддерживаются документы PDF и DOCX")
     content = await file.read(_MAX_DOCUMENT_BYTES + 1)
     if len(content) > _MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="Размер файла превышает 25 МБ")
-    if not content.startswith(b"%PDF-"):
+    if media_type == "application/pdf" and not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=415, detail="Файл не прошёл проверку сигнатуры PDF")
+    if media_type != "application/pdf" and not content.startswith(b"PK\x03\x04"):
+        raise HTTPException(status_code=415, detail="Файл не прошёл проверку сигнатуры DOCX")
     digest = hashlib.sha256(content).hexdigest()
     duplicate = session.scalar(
         select(SourceDocumentRecord).where(
@@ -157,32 +195,37 @@ async def upload_vessel_document(
     if duplicate is not None:
         raise HTTPException(status_code=409, detail="Этот файл уже загружен для данного судна")
     document_id = str(uuid.uuid4())
-    stored_name = f"{document_id}.pdf"
+    stored_name = f"{document_id}{suffix}"
     _DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
     storage_path = _DOCUMENT_STORAGE / stored_name
     try:
         # Many otherwise valid PDFs contain minor structural deviations.
         # Non-strict parsing tolerates these without changing the source bytes.
-        reader = PdfReader(BytesIO(content), strict=False)
-        if reader.is_encrypted:
-            try:
-                decrypted = reader.decrypt("")
-            except (ValueError, TypeError, NotImplementedError):
-                decrypted = 0
-            if not decrypted:
-                raise HTTPException(
-                    status_code=422,
-                    detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
-                )
-        # Some ship stability PDFs contain unusually complex vector content streams.
-        # Raise only the per-stream parsing-work budget, keeping it finite.
-        with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
-            pages = [
-                (index + 1, page.extract_text() or "")
-                for index, page in enumerate(reader.pages)
-            ]
-        if not pages:
-            raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+        if media_type == "application/pdf":
+            reader = PdfReader(BytesIO(content), strict=False)
+            if reader.is_encrypted:
+                try:
+                    decrypted = reader.decrypt("")
+                except (ValueError, TypeError, NotImplementedError):
+                    decrypted = 0
+                if not decrypted:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
+                    )
+            # Keep parsing bounded: ship PDFs can contain large vector drawings.
+            with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
+                pages = [
+                    (index + 1, page.extract_text() or "")
+                    for index, page in enumerate(reader.pages)
+                ]
+            if not pages:
+                raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+        else:
+            docx_text, _ = read_docx_tables(content)
+            if not docx_text.strip():
+                raise HTTPException(status_code=422, detail="В DOCX не найден текст или таблицы")
+            pages = [(1, docx_text)]
     except HTTPException:
         raise
     except LimitReachedError as exc:
@@ -197,28 +240,34 @@ async def upload_vessel_document(
             ),
         ) from exc
     except Exception as exc:
-        logger.exception("Failed to parse uploaded PDF %s", original_name)
+        logger.exception("Failed to parse uploaded document %s", original_name)
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Не удалось обработать структуру PDF ({type(exc).__name__}: {exc}). "
-                "Проверьте файл или пересохраните его в PDF."
+                f"Не удалось обработать структуру документа ({type(exc).__name__}: {exc}). "
+                "Проверьте PDF/DOCX и попробуйте пересохранить файл."
             ),
         ) from exc
 
-    candidates = extract_principal_particulars(pages)
+    candidates = extract_principal_particulars(pages) if media_type == "application/pdf" else []
+    resolved_document_type = (
+        classify_document_type(pages, filename=original_name)
+        if document_type == "auto" else document_type
+    )
     has_text = any(text.strip() for _, text in pages)
-    extraction_status = "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
+    extraction_status = (
+        "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
+    ) if media_type == "application/pdf" else "DOCX_TABLES_EXTRACTED"
     storage_path.write_bytes(content)
     record = SourceDocumentRecord(
         id=document_id,
         vessel_id=vessel_id,
         original_filename=original_name,
         stored_filename=stored_name,
-        media_type="application/pdf",
+        media_type=media_type,
         size_bytes=len(content),
         sha256=digest,
-        document_type=document_type,
+        document_type=resolved_document_type,
         extraction_status=extraction_status,
         extracted_candidates=candidates,
     )
@@ -233,7 +282,74 @@ async def upload_vessel_document(
     return _document_summary(record)
 
 
+@app.post("/api/v1/vessels/{vessel_id}/calculation-import", tags=["documents", "calculations"])
+async def import_calculation_documents(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    files: Annotated[list[UploadFile], File()],
+) -> dict[str, object]:
+    """Archive source files and map supported document evidence into a reviewed draft."""
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    if not 1 <= len(files) <= 8:
+        raise HTTPException(status_code=422, detail="Выберите от 1 до 8 файлов PDF/DOCX")
+
+    artifacts: list[SourceArtifact] = []
+    contents: list[tuple[UploadFile, bytes]] = []
+    total_bytes = 0
+    for file in files:
+        original_name = Path(file.filename or "document").name
+        suffix = Path(original_name).suffix.lower()
+        expected_media_type = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }.get(suffix)
+        if expected_media_type is None:
+            raise HTTPException(status_code=415, detail=f"Формат {suffix or 'без расширения'} не поддерживается; выберите PDF или DOCX")
+        content = await file.read(_MAX_DOCUMENT_BYTES + 1)
+        if len(content) > _MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail=f"{original_name}: размер превышает 25 МБ")
+        total_bytes += len(content)
+        if total_bytes > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Общий размер выбранных документов превышает 50 МБ")
+        if expected_media_type == "application/pdf" and not content.startswith(b"%PDF-"):
+            raise HTTPException(status_code=415, detail=f"{original_name}: неверная сигнатура PDF")
+        if expected_media_type.endswith("wordprocessingml.document") and not content.startswith(b"PK\x03\x04"):
+            raise HTTPException(status_code=415, detail=f"{original_name}: неверная сигнатура DOCX")
+        contents.append((file, content))
+        artifacts.append(SourceArtifact(original_name, expected_media_type, content))
+
+    try:
+        imported = build_calculation_draft(artifacts)
+    except Exception as exc:
+        logger.exception("Failed to build calculation import for vessel %s", vessel_id)
+        raise HTTPException(status_code=422, detail=f"Не удалось извлечь данные: {type(exc).__name__}: {exc}") from exc
+
+    stored_documents: list[dict[str, object]] = []
+    for file, _content in contents:
+        await file.seek(0)
+        try:
+            stored_documents.append(await upload_vessel_document(vessel_id, session, file, "auto"))
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            # Re-selecting an already archived source reuses its immutable record.
+            existing = session.scalar(select(SourceDocumentRecord).where(
+                SourceDocumentRecord.vessel_id == vessel_id,
+                SourceDocumentRecord.sha256 == hashlib.sha256(_content).hexdigest(),
+            ))
+            if existing is None:
+                raise
+            stored_documents.append(_document_summary(existing))
+    return {**imported, "documents": stored_documents}
+
+
 def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
+    document_type = record.document_type
+    if document_type == "other":
+        # Legacy uploads were stored as "other" before automatic classification.
+        # Use a strong filename heading as a display fallback without mutating the record.
+        document_type = classify_document_type([], filename=record.original_filename)
     return {
         "id": record.id,
         "vessel_id": record.vessel_id,
@@ -241,9 +357,12 @@ def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
         "media_type": record.media_type,
         "size_bytes": record.size_bytes,
         "sha256": record.sha256,
-        "document_type": record.document_type,
+        "document_type": document_type,
         "extraction_status": record.extraction_status,
-        "candidate_count": len(record.extracted_candidates),
+        "candidate_count": len({
+            (item.get("field"), item.get("value"), item.get("unit"))
+            for item in record.extracted_candidates
+        }),
         "uploaded_at": record.uploaded_at.isoformat(),
     }
 
@@ -296,13 +415,31 @@ def get_document_extraction_report(
     document_id: str,
     session: Annotated[Session, Depends(get_session)],
 ) -> dict[str, object]:
-    """Rebuild the full-document evidence inventory from the immutable PDF original."""
+    """Return the versioned report cache or build it once from the immutable PDF."""
     record = session.get(SourceDocumentRecord, document_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Документ не найден")
     storage_path = (_DOCUMENT_STORAGE / record.stored_filename).resolve()
     if storage_path.parent != _DOCUMENT_STORAGE.resolve() or not storage_path.is_file():
         raise HTTPException(status_code=404, detail="Оригинал документа недоступен")
+    document_id_value = record.id
+    filename = record.original_filename
+    sha256 = record.sha256
+    if (
+        record.analysis_version == _DOCUMENT_ANALYSIS_VERSION
+        and record.extraction_report is not None
+    ):
+        return {
+            "document_id": document_id_value,
+            "filename": filename,
+            "sha256": sha256,
+            "report": record.extraction_report,
+            "analysis_version": record.analysis_version,
+            "analysis_completed_at": (
+                record.analysis_completed_at.isoformat()
+                if record.analysis_completed_at else None
+            ),
+        }
     try:
         reader = PdfReader(str(storage_path), strict=False)
         if reader.is_encrypted:
@@ -320,7 +457,21 @@ def get_document_extraction_report(
         report = build_extraction_report(pages)
         # Table extraction is limited to pages whose text suggests technical tables.
         # It does not approve or normalize any cell values.
-        report["table_analysis"] = extract_pdf_tables(storage_path, pages)
+        table_analysis = extract_pdf_tables(storage_path, pages)
+        report["table_analysis"] = table_analysis
+        report["dataset_coverage"] = build_dataset_coverage(report, table_analysis)
+        cached_at = None
+        if table_analysis.get("status") != "TABLE_EXTRACTION_FAILED":
+            cached_at = datetime.now(UTC)
+            record.analysis_version = _DOCUMENT_ANALYSIS_VERSION
+            record.extraction_report = report
+            record.analysis_completed_at = cached_at
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                cached_at = None
+                logger.exception("Could not cache extraction report for document %s", document_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -330,10 +481,12 @@ def get_document_extraction_report(
             detail=f"Не удалось повторно проанализировать PDF ({type(exc).__name__}: {exc}).",
         ) from exc
     return {
-        "document_id": record.id,
-        "filename": record.original_filename,
-        "sha256": record.sha256,
+        "document_id": document_id_value,
+        "filename": filename,
+        "sha256": sha256,
         "report": report,
+        "analysis_version": _DOCUMENT_ANALYSIS_VERSION if cached_at else None,
+        "analysis_completed_at": cached_at.isoformat() if cached_at else None,
     }
 
 
@@ -341,6 +494,17 @@ class CandidateDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(APPROVE|REJECT)$")
     reviewer_label: str = Field(min_length=2, max_length=80)
     approved_value: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class CandidateBatchApprovalItem(BaseModel):
+    candidate_index: int = Field(ge=0)
+    approved_value: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class CandidateBatchApprovalRequest(BaseModel):
+    reviewer_label: str = Field(min_length=2, max_length=80)
+    items: list[CandidateBatchApprovalItem] = Field(min_length=1, max_length=100)
     comment: str | None = Field(default=None, max_length=2000)
 
 
@@ -363,23 +527,67 @@ def get_document_candidates(
             )
         )
     }
-    candidates = []
+    grouped: dict[tuple[object, ...], dict[str, object]] = {}
     for index, candidate in enumerate(record.extracted_candidates):
         decision = decisions.get(index)
-        candidates.append({
-            **candidate,
-            "candidate_index": index,
-            "review_status": decision.decision if decision else "PENDING",
-            "decision": (
-                {
-                    "reviewer_label": decision.reviewer_label,
-                    "decided_at": decision.decided_at.isoformat(),
-                    "comment": decision.comment,
-                    "approved_value": decision.approved_value,
-                    "revision_number": decision.revision_number,
-                } if decision else None
-            ),
-        })
+        review_status = decision.decision if decision else "PENDING"
+        approved_value = decision.approved_value if decision else None
+        reviewer = decision.reviewer_label if decision else None
+        # Pending legacy duplicates remain individually actionable. Reviewed
+        # duplicates can be displayed together only when their decisions agree.
+        identity: tuple[object, ...] = (
+            candidate.get("field"),
+            candidate.get("value"),
+            candidate.get("unit"),
+            review_status,
+            approved_value,
+            reviewer,
+            index if review_status == "PENDING" else None,
+        )
+        evidence = candidate.get("evidence") or [{
+            "page": candidate.get("page"),
+            "matched_text": candidate.get("matched_text"),
+        }]
+        decision_data = (
+            {
+                "reviewer_label": decision.reviewer_label,
+                "decided_at": decision.decided_at.isoformat(),
+                "comment": decision.comment,
+                "approved_value": decision.approved_value,
+                "revision_number": decision.revision_number,
+            } if decision else None
+        )
+        if identity not in grouped:
+            grouped[identity] = {
+                **candidate,
+                "candidate_index": index,
+                "candidate_indices": [index],
+                "review_status": review_status,
+                "evidence": list(evidence),
+                "decisions": [decision_data] if decision_data else [],
+                "decision": decision_data,
+            }
+            continue
+        item = grouped[identity]
+        item["candidate_indices"].append(index)
+        for source in evidence:
+            if source not in item["evidence"]:
+                item["evidence"].append(source)
+        if decision_data:
+            item["decisions"].append(decision_data)
+    candidates = []
+    for item in grouped.values():
+        decision_rows = item["decisions"]
+        if decision_rows:
+            revision_numbers = sorted({
+                row["revision_number"] for row in decision_rows
+                if row["revision_number"] is not None
+            })
+            item["decision"] = {
+                **decision_rows[0],
+                "revision_numbers": revision_numbers,
+            }
+        candidates.append(item)
     return {
         "document_id": record.id,
         "filename": record.original_filename,
@@ -473,6 +681,9 @@ def decide_document_candidate(
             "proposed_value": proposed_value,
             "approved_value": approved_value,
             "unit": "m",
+            "evidence": candidate.get("evidence", [
+                {"page": int(candidate["page"]), "matched_text": str(candidate["matched_text"])}
+            ]),
             "decision_id": decision.id,
             "reviewer_label": decision.reviewer_label,
             "decided_at": datetime.now(UTC).isoformat(),
@@ -502,6 +713,141 @@ def decide_document_candidate(
             if request.decision == "APPROVE"
             else "Кандидат отклонён. Исходные данные судна не изменены."
         ),
+    }
+
+
+@app.post(
+    "/api/v1/documents/{document_id}/candidates/approve-batch",
+    status_code=status.HTTP_201_CREATED,
+    tags=["documents"],
+)
+def approve_document_candidates_batch(
+    document_id: str,
+    request: CandidateBatchApprovalRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Approve several reviewed values atomically in one immutable vessel revision."""
+    document = session.get(SourceDocumentRecord, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    reviewer_label = request.reviewer_label.strip()
+    if len(reviewer_label) < 2:
+        raise HTTPException(status_code=422, detail="Укажите имя или должность проверяющего")
+
+    indices = [item.candidate_index for item in request.items]
+    if len(indices) != len(set(indices)):
+        raise HTTPException(status_code=422, detail="В пакетном подтверждении есть повторяющиеся кандидаты")
+
+    existing_indices = set(session.scalars(
+        select(DocumentCandidateDecisionRecord.candidate_index).where(
+            DocumentCandidateDecisionRecord.document_id == document_id,
+            DocumentCandidateDecisionRecord.candidate_index.in_(indices),
+        )
+    ))
+    if existing_indices:
+        raise HTTPException(status_code=409, detail="Часть кандидатов уже имеет зафиксированное решение")
+
+    allowed_limits = {
+        "loa_m": 1000.0,
+        "lbp_m": 1000.0,
+        "moulded_breadth_m": 250.0,
+        "moulded_depth_m": 150.0,
+    }
+    latest = session.scalar(
+        select(VesselDataRevisionRecord)
+        .where(VesselDataRevisionRecord.vessel_id == document.vessel_id)
+        .order_by(VesselDataRevisionRecord.revision_number.desc())
+        .limit(1)
+    )
+    values = dict(latest.values) if latest else {}
+    sources = dict(latest.source_references) if latest else {}
+    decisions: list[DocumentCandidateDecisionRecord] = []
+    summaries: list[dict[str, object]] = []
+    approved_fields: set[str] = set()
+
+    for item in request.items:
+        if item.candidate_index >= len(document.extracted_candidates):
+            raise HTTPException(status_code=404, detail=f"Кандидат {item.candidate_index} не найден")
+        candidate = document.extracted_candidates[item.candidate_index]
+        field = candidate.get("field")
+        if field not in allowed_limits or candidate.get("unit") != "m":
+            raise HTTPException(status_code=422, detail="Один из кандидатов имеет неподдерживаемый тип или единицу")
+        if field in approved_fields:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Найдено несколько разных значений для {field}. Подтвердите только одно после сверки.",
+            )
+        approved_fields.add(str(field))
+        proposed_value = float(candidate.get("value", 0))
+        approved_value = item.approved_value if item.approved_value is not None else proposed_value
+        if not math.isfinite(approved_value) or not 0 < approved_value <= allowed_limits[field]:
+            raise HTTPException(status_code=422, detail=f"Проверенное значение {field} вне допустимого диапазона")
+        values[field] = approved_value
+        decision_id = str(uuid.uuid4())
+        decision = DocumentCandidateDecisionRecord(
+            id=decision_id,
+            document_id=document.id,
+            candidate_index=item.candidate_index,
+            field=field,
+            proposed_value=proposed_value,
+            approved_value=approved_value,
+            unit="m",
+            page=int(candidate["page"]),
+            matched_text=str(candidate["matched_text"]),
+            decision="APPROVE",
+            reviewer_label=reviewer_label,
+            comment=request.comment.strip() if request.comment else None,
+        )
+        decisions.append(decision)
+        sources[field] = {
+            "document_id": document.id,
+            "filename": document.original_filename,
+            "page": int(candidate["page"]),
+            "matched_text": str(candidate["matched_text"]),
+            "evidence": candidate.get("evidence", [
+                {"page": int(candidate["page"]), "matched_text": str(candidate["matched_text"])}
+            ]),
+            "proposed_value": proposed_value,
+            "approved_value": approved_value,
+            "unit": "m",
+            "decision_id": decision_id,
+            "reviewer_label": reviewer_label,
+            "decided_at": datetime.now(UTC).isoformat(),
+        }
+        summaries.append({
+            "candidate_index": item.candidate_index,
+            "field": field,
+            "approved_value": approved_value,
+        })
+
+    if values.get("lbp_m") is not None and values.get("loa_m") is not None and values["lbp_m"] > values["loa_m"]:
+        raise HTTPException(status_code=422, detail="LBP не может превышать LOA в одной ревизии")
+    if values.get("moulded_breadth_m") is not None and values.get("loa_m") is not None and values["moulded_breadth_m"] > values["loa_m"]:
+        raise HTTPException(status_code=422, detail="Ширина B не может превышать LOA в одной ревизии")
+
+    revision_number = (latest.revision_number if latest else 0) + 1
+    for decision in decisions:
+        decision.revision_number = revision_number
+        session.add(decision)
+    session.add(VesselDataRevisionRecord(
+        vessel_id=document.vessel_id,
+        revision_number=revision_number,
+        values=values,
+        source_references=sources,
+        created_by=reviewer_label,
+        change_summary=f"Пакетно подтверждено параметров: {len(decisions)} из {document.original_filename}",
+    ))
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    return {
+        "revision_number": revision_number,
+        "approved_count": len(decisions),
+        "items": summaries,
+        "message": f"Подтверждено параметров: {len(decisions)}. Создана одна ревизия исходных данных.",
     }
 
 
@@ -722,4 +1068,146 @@ def validate_loading_condition(
             "значения требуют проверки человеком. Расчёт водоизмещения, дифферента "
             "и остойчивости не выполнялся."
         ),
+    }
+
+
+def _calculation_run_summary(record: CalculationRunRecord) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "vessel_id": record.vessel_id,
+        "name": record.name,
+        "vessel_data_revision": record.vessel_data_revision,
+        "engine_version": record.engine_version,
+        "status": record.status,
+        "created_at": record.created_at.isoformat(),
+        "displacement_t": record.calculation_result["outputs"]["displacement_t"],
+        "mean_draft_m": record.calculation_result["outputs"]["mean_draft_m"],
+    }
+
+
+@app.post("/api/v1/calculations/loading-condition", status_code=status.HTTP_201_CREATED,
+          tags=["calculations"])
+def create_loading_calculation(
+    request: LoadingCalculationRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Calculate from explicit source-backed inputs and persist an immutable estimate."""
+    if session.get(VesselRecord, request.vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    lightship = Lightship(
+        mass_t=request.lightship.mass_t,
+        lcg_m=request.lightship.lcg_m,
+        tcg_m=request.lightship.tcg_m,
+        vcg_m=request.lightship.vcg_m,
+        forward_moment_tm=request.lightship.forward_strength_moment_tm,
+    )
+    items = [
+        WeightItem(
+            name=item.name,
+            mass_t=item.mass_t,
+            lcg_m=item.lcg_m,
+            tcg_m=item.tcg_m,
+            vcg_m=item.vcg_m,
+            free_surface_moment_tm=item.free_surface_moment_tm,
+            include_in_forward_strength=item.include_in_forward_strength,
+        )
+        for item in request.items
+    ]
+    hydrostatic_table = [
+        HydrostaticPoint(
+            displacement_volume_m3=row.displacement_volume_m3,
+            draft_extreme_m=row.draft_extreme_m,
+            lcf_from_ap_m=row.lcf_from_ap_m,
+            lcb_from_ap_m=row.lcb_from_ap_m,
+            transverse_metacentre_z_m=row.transverse_metacentre_z_m,
+            mct_t_m_per_cm=row.mct_t_m_per_cm,
+        )
+        for row in request.hydrostatic_table
+    ]
+    try:
+        outputs = calculate_loading_condition(
+            lightship=lightship,
+            items=items,
+            lbp_m=request.lbp_m,
+            seawater_density_t_m3=request.seawater_density_t_m3,
+            hydrostatic_table=hydrostatic_table,
+        )
+    except CalculationInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    warnings = [
+        "Предварительный расчёт по учебной методике; он не одобрен для эксплуатационных решений.",
+        "Программа проверяет заданные источники по ссылкам, но не подтверждает их точность.",
+        "Критерии IMO/Class, ветер, заливание и пределы прочности этим запуском не проверялись.",
+    ]
+    stability_curve = None
+    if request.kn_curve:
+        stability_curve = calculate_gz_curve(
+            kn_curve=[KNPoint(heel_angle_deg=point.heel_angle_deg, kn_m=point.kn_m)
+                      for point in request.kn_curve],
+            corrected_vcg_m=outputs["corrected_vcg_m"],
+        )
+    else:
+        warnings.append("Кривая KN не задана: проверка больших углов крена не выполнена.")
+    if outputs["forward_strength_moment_tm"] is None:
+        warnings.append("Проверка общего продольного момента не выполнена: исходный момент порожнего судна не задан.")
+    calculation_result = {
+        "status": "ESTIMATE_ONLY",
+        "engine_version": _CALCULATION_ENGINE_VERSION,
+        "outputs": outputs,
+        "stability_curve": stability_curve,
+        "warnings": warnings,
+        "interpolation": {
+            "method": "linear_between_adjacent_hydrostatic_rows",
+            "extrapolation": "prohibited",
+            "table_volume_min_m3": min(row.displacement_volume_m3 for row in hydrostatic_table),
+            "table_volume_max_m3": max(row.displacement_volume_m3 for row in hydrostatic_table),
+        },
+    }
+    record = CalculationRunRecord(
+        vessel_id=request.vessel_id,
+        name=request.name,
+        vessel_data_revision=request.vessel_data_revision,
+        engine_version=_CALCULATION_ENGINE_VERSION,
+        status="ESTIMATE_ONLY",
+        calculation_input=request.model_dump(mode="json"),
+        calculation_result=calculation_result,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return {
+        **_calculation_run_summary(record),
+        "calculation_input": record.calculation_input,
+        "calculation_result": calculation_result,
+    }
+
+
+@app.get("/api/v1/vessels/{vessel_id}/calculation-runs", tags=["calculations"])
+def list_loading_calculations(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> list[dict[str, object]]:
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    records = session.scalars(
+        select(CalculationRunRecord)
+        .where(CalculationRunRecord.vessel_id == vessel_id)
+        .order_by(CalculationRunRecord.created_at.desc())
+    ).all()
+    return [_calculation_run_summary(record) for record in records]
+
+
+@app.get("/api/v1/calculation-runs/{run_id}", tags=["calculations"])
+def get_loading_calculation(
+    run_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    record = session.get(CalculationRunRecord, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    return {
+        **_calculation_run_summary(record),
+        "calculation_input": record.calculation_input,
+        "calculation_result": record.calculation_result,
     }

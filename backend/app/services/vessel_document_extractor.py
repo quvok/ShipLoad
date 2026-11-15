@@ -28,12 +28,14 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
-        r"\b(?:(?:moulded|molded)\s+breadth|(?:moulded|molded)\s+beam|breadth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
+        r"\b(?:(?:moulded|molded)\s+breadth|(?:moulded|molded)\s+beam|"
+        r"breadth\s*\(\s*(?:moulded|molded)\s*\)|breadth(?:\s+(?:mld|moulded|molded))?)[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
     "moulded_depth_m": re.compile(
-        r"\b(?:(?:moulded|molded)\s+depth|depth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
+        r"\b(?:(?:moulded|molded)\s+depth|"
+        r"depth\s*\(\s*(?:moulded|molded)\s*\)|depth(?:\s+(?:mld|moulded|molded))?)[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
@@ -43,17 +45,60 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
 def extract_principal_particulars(pages: list[tuple[int, str]]) -> list[dict[str, object]]:
     """Return candidates with page and matched source text; never approve them."""
     candidates: list[dict[str, object]] = []
+    candidate_index: dict[tuple[str, float, str], int] = {}
     for page_number, text in pages:
         for field, pattern in _PATTERNS.items():
             for match in pattern.finditer(text):
                 value = float(match.group(1).replace(",", "."))
                 if not 0 < value < 2000:
                     continue
-                candidates.append(asdict(ExtractedCandidate(
+                matched_text = match.group(0).strip()
+                key = (field, value, "m")
+                evidence = {"page": page_number, "matched_text": matched_text}
+                existing_index = candidate_index.get(key)
+                if existing_index is not None:
+                    existing = candidates[existing_index]
+                    sources = existing["evidence"]
+                    if evidence not in sources:
+                        sources.append(evidence)
+                    continue
+                candidate = asdict(ExtractedCandidate(
                     field=field, value=value, unit="m", page=page_number,
-                    matched_text=match.group(0).strip(),
-                )))
+                    matched_text=matched_text,
+                ))
+                candidate["evidence"] = [evidence]
+                candidate_index[key] = len(candidates)
+                candidates.append(candidate)
     return candidates
+
+
+def classify_document_type(
+    pages: list[tuple[int, str]],
+    *,
+    filename: str | None = None,
+) -> str:
+    """Classify a PDF from explicit document headings, conservatively.
+
+    Stability information takes precedence because it commonly contains
+    principal particulars, tank plans, and general-arrangement references.
+    """
+    text = "\n".join(page_text for _, page_text in pages).casefold()
+    filename_text = (filename or "").casefold()
+    if any(term in text for term in (
+        "stability information", "information on stability", "information of stability",
+        "stability booklet", "intact stability booklet", "информация об остойчивости",
+    )) or "информация об остойчивости" in filename_text or "stability booklet" in filename_text:
+        return "stability_booklet"
+    if any(term in text for term in ("general arrangement", "общий вид", "общее расположение")) or "general arrangement" in filename_text:
+        return "general_arrangement"
+    if any(term in text for term in ("lines plan", "lines drawing", "теоретический чертёж", "теоретический чертеж")) or "lines plan" in filename_text:
+        return "lines_plan"
+    if any(term in text for term in (
+        "principal particulars", "ship's particulars", "vessel particulars",
+        "основные характеристики судна", "главные размерения",
+    )) or any(term in filename_text for term in ("principal particulars", "ship particulars")):
+        return "ship_particulars"
+    return "other"
 
 
 _REPORT_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -145,6 +190,11 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
     empty_pages = [number for number, text in pages if not text.strip()]
     sections: dict[str, object] = {}
 
+    # A document-wide OCR warning is raised only when at least half of all
+    # pages have no extractable text. This is deliberately a coverage signal,
+    # not a claim that a particular missing section is located on a blank page.
+    ocr_coverage_gap = bool(pages) and len(empty_pages) / len(pages) >= 0.5
+
     for key, terms in _REPORT_SECTIONS.items():
         evidence: list[dict[str, object]] = []
         seen: set[tuple[int, str]] = set()
@@ -174,12 +224,18 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
 
         sections[key] = {
             "label": _SECTION_LABELS[key],
-            "status": "TEXT_EVIDENCE_FOUND" if evidence else "NOT_FOUND_IN_EXTRACTED_TEXT",
+            "status": (
+                "TEXT_EVIDENCE_FOUND" if evidence else
+                "OCR_REQUIRED" if ocr_coverage_gap else
+                "NOT_FOUND_IN_EXTRACTED_TEXT"
+            ),
             "evidence_count": len(evidence),
             "evidence": evidence,
             "note": (
                 "Найдены текстовые указатели. Они не являются утверждёнными параметрами."
                 if evidence else
+                "Значительная часть документа не имеет извлекаемого текстового слоя. Требуется OCR/визуальная проверка; это предупреждение относится ко всему документу и не указывает, на каких именно страницах расположен этот раздел."
+                if ocr_coverage_gap else
                 "Совпадения в текстовом слое не найдены. Это не доказывает отсутствие данных на схемах или изображениях."
             ),
         }
@@ -190,6 +246,12 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
         "page_count": len(pages),
         "pages_with_text": len(text_pages),
         "pages_without_text": empty_pages,
+        "ocr_coverage": {
+            "pages_without_text": len(empty_pages),
+            "total_pages": len(pages),
+            "document_wide_ocr_warning": ocr_coverage_gap,
+            "warning_threshold": 0.5,
+        },
         "pages": [
             {"page": number, "category": _page_category(text), "has_text": bool(text.strip())}
             for number, text in pages

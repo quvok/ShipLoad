@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import CalculationPage from "./CalculationPage";
 
 type NavKey = "overview" | "vessels" | "tanks" | "documents" | "loading" | "reports";
 type VesselType = "general_cargo" | "container" | "bulk_carrier" | "tanker" | "multipurpose" | "other";
@@ -25,6 +26,7 @@ function App() {
   const [active, setActive] = useState<NavKey>("overview");
   const [vessels, setVessels] = useState<Vessel[]>([]);
   const [apiState, setApiState] = useState<"checking" | "online" | "offline">("checking");
+  const [workspaceCounts, setWorkspaceCounts] = useState({ documents: 0, conditions: 0, calculations: 0 });
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -44,6 +46,31 @@ function App() {
   }, []);
 
   useEffect(() => { void loadVessels(); }, [loadVessels]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCounts() {
+      if (!vessels.length) { setWorkspaceCounts({ documents: 0, conditions: 0, calculations: 0 }); return; }
+      const totals = await Promise.all(vessels.map(async vessel => {
+        const endpoints = [
+          `/vessels/${encodeURIComponent(vessel.id)}/documents`,
+          `/vessels/${encodeURIComponent(vessel.id)}/loading-conditions`,
+          `/vessels/${encodeURIComponent(vessel.id)}/calculation-runs`,
+        ];
+        const counts = await Promise.all(endpoints.map(async path => {
+          try { const response = await fetch(`${API}${path}`); return response.ok ? (await response.json() as unknown[]).length : 0; }
+          catch { return 0; }
+        }));
+        return { documents: counts[0], conditions: counts[1], calculations: counts[2] };
+      }));
+      if (!cancelled) setWorkspaceCounts(totals.reduce((sum,row) => ({
+        documents: sum.documents + row.documents, conditions: sum.conditions + row.conditions,
+        calculations: sum.calculations + row.calculations,
+      }), { documents: 0, conditions: 0, calculations: 0 }));
+    }
+    void loadCounts();
+    return () => { cancelled = true; };
+  }, [vessels]);
 
   async function createVessel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
@@ -82,7 +109,7 @@ function App() {
       <main className="main">
         <header className="topbar"><div><span className="breadcrumb">Рабочая область</span><span className="slash">/</span><strong>{navigation.find((item) => item.key === active)?.label}</strong></div><div className="topbar-right"><span className="env-tag">РАЗРАБОТКА</span><a className="help-button" href="https://github.com/quvok/ShipLoad" target="_blank" rel="noreferrer">Репозиторий ↗</a></div></header>
         <section className="content">
-          {active === "documents" ? (<DocumentsPage vessels={vessels} apiState={apiState} />) : active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
+          {active === "documents" ? (<DocumentsPage vessels={vessels} apiState={apiState} />) : active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "reports" ? (<CalculationPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
             <TanksPage vessels={vessels} apiState={apiState} />
           ) : active === "vessels" ? (
             <VesselsPage vessels={vessels} apiState={apiState} showForm={showForm} setShowForm={setShowForm}
@@ -90,12 +117,12 @@ function App() {
           ) : (
             <>
               <div className="page-heading"><div><div className="eyebrow">СУДОВОЖДЕНИЕ / ИНЖЕНЕРНЫЕ РАСЧЁТЫ</div><h1>{active === "overview" ? "Рабочая область судна" : navigation.find((item) => item.key === active)?.label}</h1><p>Управление данными судна, проверка судовой документации и подготовка загрузочных условий.</p></div><button className="primary-button" onClick={() => { setActive("vessels"); setShowForm(true); }}>＋ Добавить судно</button></div>
-              <div className="notice"><span className="notice-icon">!</span><div><strong>Тестовая версия — не допущена к эксплуатации</strong><p>Расчёты остойчивости и загрузки пока не реализованы. Не используйте приложение для принятия решений, влияющих на безопасность судна.</p></div></div>
+              <div className="notice"><span className="notice-icon">!</span><div><strong>Предварительные расчёты доступны в разделе «Расчёты»</strong><p>Результаты учебные и требуют проверки исходных документов. Приложение не одобрено для оперативных решений о загрузке судна.</p></div></div>
               <div className="metric-grid">
                 <Metric label="СУДА" value={String(vessels.length)} detail={vessels.length ? "Профили в локальной базе" : "Профили судов ещё не созданы"} />
-                <Metric label="СУДОВЫЕ ДОКУМЕНТЫ" value="0" detail="Ожидается первая загрузка" />
-                <Metric label="ЗАГРУЗОЧНЫЕ УСЛОВИЯ" value="0" detail="Условия загрузки не созданы" />
-                <Metric label="ПРОВЕРЕННЫЕ РАСЧЁТЫ" value="0" detail="Эталонные случаи не настроены" />
+                <Metric label="СУДОВЫЕ ДОКУМЕНТЫ" value={String(workspaceCounts.documents)} detail={workspaceCounts.documents ? "Сохранено в локальной базе" : "Документы ещё не добавлены"} />
+                <Metric label="ЗАГРУЗОЧНЫЕ УСЛОВИЯ" value={String(workspaceCounts.conditions)} detail={workspaceCounts.conditions ? "Черновые условия в локальной базе" : "Условия загрузки не созданы"} />
+                <Metric label="СОХРАНЁННЫЕ РАСЧЁТЫ" value={String(workspaceCounts.calculations)} detail={workspaceCounts.calculations ? "Предварительные расчёты, ESTIMATE_ONLY" : "Пока нет запусков расчёта"} />
               </div>
               <div className="section-grid">
                 <section className="panel getting-started"><div className="panel-heading"><div><div className="eyebrow">НАЧАЛО РАБОТЫ</div><h2>Настройка первого судна</h2></div><span className="step-count">{vessels.length ? "1" : "0"} / 4</span></div>
@@ -107,8 +134,8 @@ function App() {
                 </section>
                 <section className="panel status-panel"><div className="eyebrow">СОСТОЯНИЕ СИСТЕМЫ</div><h2>Расчётные модули</h2>
                   <StatusRow name="Локальная база данных" status={apiState === "online" ? "Подключена" : apiState === "checking" ? "Проверка" : "Нет подключения"} />
-                  <StatusRow name="Распознавание документов" status="Не реализовано" /><StatusRow name="Гидростатические расчёты" status="Не реализованы" /><StatusRow name="Проверка критериев остойчивости" status="Не реализована" /><StatusRow name="Формирование отчётов" status="Не реализовано" />
-                  <div className="status-foot">Модули будут доступны после выполнения требований к проверке и подтверждению данных.</div>
+                  <StatusRow name="Посадка, дифферент, GM и крен" status="Учебный расчёт доступен" /><StatusRow name="Гидростатическая интерполяция" status="Без экстраполяции" /><StatusRow name="Критерии IMO/Class и полная ДСО" status="Требуют отдельной валидации" />
+                  <div className="status-foot">Откройте «Расчёты», введите сверенные данные или загрузите учебный пример из курсового проекта.</div>
                 </section>
               </div>
             </>
@@ -162,6 +189,16 @@ type ExtractionReport = {
     note: string;
   }>;
   limitations: string[];
+  dataset_coverage?: {
+    coverage_version: number;
+    status: string;
+    datasets: {
+      key: string; label: string; status: string; evidence_pages: number[];
+      text_evidence_count: number; table_evidence_count: number;
+      review_required: boolean; note: string;
+    }[];
+    limitations: string[];
+  };
   table_analysis?: {
     status: string; candidate_pages: number[]; pages_checked: number[];
     pages_skipped_by_limit: number[]; pages_skipped_complex: number[]; tables_found: number;
@@ -173,8 +210,9 @@ type ExtractionReport = {
 
 type ExtractedCandidate = {
   field: string; value: number; unit: string; page: number; matched_text: string; status: string;
-  candidate_index: number; review_status: string;
-  decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null } | null;
+  evidence?: { page: number; matched_text: string }[];
+  candidate_index: number; candidate_indices?: number[]; review_status: string;
+  decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null; revision_numbers?: number[] } | null;
 };
 const documentTypes = [
   ["ship_particulars", "Основные характеристики судна"],
@@ -245,6 +283,8 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
   useEffect(() => {
     setReport(null);
     if (!selectedDocument) return;
+    const selected = documents.find(doc => doc.id === selectedDocument);
+    if (selected?.media_type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return;
     void fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/report`)
       .then(async response => {
         if (!response.ok) throw new Error("Не удалось получить полный отчёт анализа документа.");
@@ -252,7 +292,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       })
       .then(data => setReport(data.report))
       .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка анализа документа."));
-  }, [selectedDocument]);
+  }, [selectedDocument, documents]);
   async function reviewCandidate(item: ExtractedCandidate, decision: "APPROVE" | "REJECT") {
     if (reviewerLabel.trim().length < 2) {
       setError("Укажите имя или должность проверяющего (не менее 2 символов).");
@@ -287,6 +327,39 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       setError(cause instanceof Error ? cause.message : "Ошибка при проверке кандидата.");
     } finally { setReviewingCandidate(null); }
   }
+  async function approveAllCandidates() {
+    const pending = candidates.filter(item => item.review_status === "PENDING");
+    if (!pending.length) return;
+    if (reviewerLabel.trim().length < 2) {
+      setError("Укажите имя или должность проверяющего (не менее 2 символов).");
+      return;
+    }
+    const items = pending.map(item => ({
+      candidate_index: item.candidate_index,
+      approved_value: Number(correctedValues[item.candidate_index] ?? item.value),
+    }));
+    if (items.some(item => !Number.isFinite(item.approved_value) || item.approved_value <= 0)) {
+      setError("Проверьте все значения перед пакетным подтверждением.");
+      return;
+    }
+    setReviewingCandidate(-1); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates/approve-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer_label: reviewerLabel.trim(), items }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось пакетно подтвердить кандидаты.");
+      const refreshed = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates`);
+      if (!refreshed.ok) throw new Error("Ревизия сохранена, но список кандидатов не обновился.");
+      const data = await refreshed.json() as { candidates: ExtractedCandidate[] };
+      setCandidates(data.candidates);
+      setMessage(body.message);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ошибка пакетного подтверждения.");
+    } finally { setReviewingCandidate(null); }
+  }
   const selected = documents.find(doc => doc.id === selectedDocument);
   return <>
     <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите один PDF. Система анализирует весь документ и формирует обзор найденных разделов и значений с привязкой к страницам.</p></div></div>
@@ -298,8 +371,8 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       <form onSubmit={upload}>
         <div className="form-grid">
           <label>Судно<select value={vesselId} onChange={event => setVesselId(event.target.value)} required><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-          <input type="hidden" name="document_type" value="other" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
-          <label>Файл PDF<input name="file" type="file" accept="application/pdf,.pdf" required /></label>
+          <input type="hidden" name="document_type" value="auto" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
+          <label>Файл PDF или DOCX<input name="file" type="file" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label>
         </div>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Загрузка…" : "Загрузить и извлечь данные"}</button></div>
       </form>
@@ -313,9 +386,25 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       {report && <div className="extraction-report">
         <div className="eyebrow">ПОЛНЫЙ ОБЗОР ДОКУМЕНТА</div>
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
+        {report.dataset_coverage && <section className="table-analysis">
+          <div className="report-section-heading"><strong>Покрытие наборов данных судна</strong><span className="draft-tag">Требует проверки</span></div>
+          <p>Сводка объединяет текстовые указатели и классифицированные табличные фрагменты. Наличие источника не означает, что таблица полностью распознана или подтверждена.</p>
+          <div className="report-section-grid">{report.dataset_coverage.datasets.map(dataset =>
+            <article className="report-section" key={dataset.key}>
+              <div className="report-section-heading"><strong>{dataset.label}</strong><span className="draft-tag">
+                {dataset.status === "TABLE_EVIDENCE_REVIEW_REQUIRED" ? "Есть таблица" :
+                  dataset.status === "TEXT_EVIDENCE_REVIEW_REQUIRED" ? "Есть текст" :
+                  dataset.status === "EXTRACTION_INCOMPLETE" ? "Извлечение неполное" : "Нет совпадений"}
+              </span></div>
+              <p>{dataset.note}</p>
+              <p className="form-hint">Страницы: {dataset.evidence_pages.length ? dataset.evidence_pages.join(", ") : "не определены"} · текстовых указателей: {dataset.text_evidence_count} · таблиц: {dataset.table_evidence_count}</p>
+            </article>
+          )}</div>
+          <div className="form-hint"><strong>Ограничения покрытия:</strong><ul>{report.dataset_coverage.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
+        </section>}
         <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
           <article className="report-section" key={key}>
-            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : "Не найдено в тексте"}</span></div>
+            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Требуется OCR" : "Не найдено в тексте"}</span></div>
             <p>{section.note}</p>
             {section.evidence.length > 0 && <ul>{section.evidence.slice(0, 5).map((item, index) =>
               <li key={index}><strong>Стр. {item.page}:</strong> {item.excerpt}</li>
@@ -327,7 +416,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
           <p>{report.table_analysis.note}</p>
           <p className="form-hint">Проверены страницы: {report.table_analysis.pages_checked.length ? report.table_analysis.pages_checked.join(", ") : "нет"}.
             {report.table_analysis.pages_skipped_by_limit.length > 0 ? ` Пропущены по лимиту страниц: ${report.table_analysis.pages_skipped_by_limit.join(", ")}.` : ""}
-            {report.table_analysis.pages_skipped_complex?.length > 0 ? ` Сложные векторные страницы пропущены ради ограничения нагрузки: ${report.table_analysis.pages_skipped_complex.join(", ")}.` : ""}
+            {report.table_analysis.pages_skipped_complex?.length > 0 ? ` Структура таблиц на сложных векторных страницах не извлекалась (${report.table_analysis.pages_skipped_complex.join(", ")}); текстовый слой этих страниц входит в общий обзор документа, схемы требуют визуальной проверки.` : ""}
           </p>
           {report.table_analysis.tables.map((table, index) => <article className="report-section" key={`${table.page}-${index}`}>
             <div className="report-section-heading"><strong>{table.label}</strong><span className="draft-tag">Стр. {table.page}</span></div>
@@ -339,16 +428,18 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         </section>}
         <div className="form-hint"><strong>Ограничения анализа:</strong><ul>{report.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
       </div>}
-      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
+      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : selected.extraction_status === "DOCX_TABLES_EXTRACTED" ? "Текст и таблицы DOCX сохранены. Откройте «Расчёты» и извлеките данные сразу из нескольких документов." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
-        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат, м</th><th>Страница</th><th>Фрагмент источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
+        <div className="form-actions"><button className="primary-button" type="button" disabled={reviewingCandidate !== null || !candidates.some(item => item.review_status === "PENDING")} onClick={() => void approveAllCandidates()}>Подтвердить все ожидающие одной ревизией</button><span className="form-hint">Перед нажатием сверьте каждое значение и все указанные страницы с оригиналом.</span></div>
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат / подтверждено, м</th><th>Страницы</th><th>Фрагменты источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
           <td>{candidateLabels[item.field] ?? item.field}</td>
-          <td><input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} disabled={item.review_status !== "PENDING"} /></td>
-          <td>{item.page}</td><td>{item.matched_text}</td>
+          <td>{item.review_status === "PENDING" ? <input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} /> : <strong>{(item.decision?.approved_value ?? item.value).toFixed(3)}</strong>}</td>
+          <td>{(item.evidence?.length ? item.evidence : [{ page: item.page, matched_text: item.matched_text }]).map(source => source.page).filter((page, index, pages) => pages.indexOf(page) === index).join(", ")}</td>
+          <td>{(item.evidence?.length ? item.evidence : [{ page: item.page, matched_text: item.matched_text }]).map((source, index) => <div key={String(source.page) + "-" + index}><small>Стр. {source.page}:</small> {source.matched_text}</div>)}</td>
           <td>{item.review_status === "PENDING" ? <div className="candidate-actions">
             <button className="secondary-button" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "APPROVE")}>{reviewingCandidate === item.candidate_index ? "Сохранение…" : "Подтвердить"}</button>
             <button className="candidate-reject" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "REJECT")}>Отклонить</button>
-          </div> : <span className={item.review_status === "APPROVE" ? "review-approved" : "review-rejected"}>{item.review_status === "APPROVE" ? "Подтверждено" : "Отклонено"}{item.decision?.revision_number ? ` · ревизия ${item.decision.revision_number}` : ""}<small>{item.decision?.reviewer_label}</small></span>}</td>
+          </div> : <span className={item.review_status === "APPROVE" ? "review-approved" : "review-rejected"}>{item.review_status === "APPROVE" ? "Подтверждено" : "Отклонено"}{item.decision?.revision_numbers?.length ? ` · ревизии ${item.decision.revision_numbers.join(", ")}` : item.decision?.revision_number ? ` · ревизия ${item.decision.revision_number}` : ""}<small>{item.decision?.reviewer_label}</small></span>}</td>
         </tr>)}</tbody></table></div>
       </>}
       <p className="form-hint">Подтверждение создаёт новую неизменяемую ревизию исходных данных с привязкой к PDF, странице, фрагменту, исходному и проверенному значению. Профиль судна не перезаписывается. Метка проверяющего пока не является аутентификацией: вход и персональные учётные записи ещё не реализованы. Решения не включают координатную систему и не разрешают эксплуатационные расчёты.</p>

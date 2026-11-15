@@ -94,6 +94,26 @@ class LoadingItemRecord(Base):
     condition: Mapped[LoadingConditionRecord] = relationship(back_populates="items")
 
 
+class CalculationRunRecord(Base):
+    """Immutable calculation input/output snapshot for reproducibility."""
+
+    __tablename__ = "calculation_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    vessel_id: Mapped[str] = mapped_column(
+        ForeignKey("vessels.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    vessel_data_revision: Mapped[str] = mapped_column(String(80), nullable=False)
+    engine_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ESTIMATE_ONLY")
+    calculation_input: Mapped[dict] = mapped_column(JSON, nullable=False)
+    calculation_result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
 class SourceDocumentRecord(Base):
     __tablename__ = "source_documents"
     __table_args__ = (
@@ -112,6 +132,9 @@ class SourceDocumentRecord(Base):
     document_type: Mapped[str] = mapped_column(String(40), nullable=False, default="other")
     extraction_status: Mapped[str] = mapped_column(String(40), nullable=False)
     extracted_candidates: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    analysis_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extraction_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
