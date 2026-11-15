@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
@@ -35,6 +36,20 @@ app = FastAPI(
         "Development API for vessel data and loading-condition workflows. "
         "Not approved for operational loading or stability decisions."
     ),
+)
+
+# Local-only development bridge for the GitHub Pages UI.
+# Keep Uvicorn bound to 127.0.0.1; this is not production authentication.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://quvok.github.io",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
