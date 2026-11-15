@@ -152,6 +152,18 @@ type SourceDocument = {
   size_bytes: number; sha256: string; document_type: string;
   extraction_status: string; candidate_count: number; uploaded_at: string;
 };
+type ExtractionReport = {
+  page_count: number;
+  pages_with_text: number;
+  pages_without_text: number[];
+  sections: Record<string, {
+    label: string; status: string; evidence_count: number;
+    evidence: { page: number; matched_terms: string[]; excerpt: string }[];
+    note: string;
+  }>;
+  limitations: string[];
+};
+
 type ExtractedCandidate = {
   field: string; value: number; unit: string; page: number; matched_text: string; status: string;
   candidate_index: number; review_status: string;
@@ -174,6 +186,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
   const [vesselId, setVesselId] = useState("");
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
   const [candidates, setCandidates] = useState<ExtractedCandidate[]>([]);
+  const [report, setReport] = useState<ExtractionReport | null>(null);
   const [selectedDocument, setSelectedDocument] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -221,6 +234,17 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       })
       .then(data => setCandidates(data.candidates))
       .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка получения кандидатов."));
+  }, [selectedDocument]);
+  useEffect(() => {
+    setReport(null);
+    if (!selectedDocument) return;
+    void fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/report`)
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось получить полный отчёт анализа документа.");
+        return await response.json() as { report: ExtractionReport };
+      })
+      .then(data => setReport(data.report))
+      .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка анализа документа."));
   }, [selectedDocument]);
   async function reviewCandidate(item: ExtractedCandidate, decision: "APPROVE" | "REJECT") {
     if (reviewerLabel.trim().length < 2) {
@@ -279,6 +303,20 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Файл</th><th>Тип</th><th>Объём</th><th>Извлечение</th><th>Кандидаты</th></tr></thead><tbody>{documents.map(doc => <tr key={doc.id} onClick={() => setSelectedDocument(doc.id)} className={selectedDocument === doc.id ? "selected-row" : ""}><td><strong>{doc.original_filename}</strong><small>SHA-256: {doc.sha256.slice(0,16)}…</small></td><td>{documentTypes.find(([value]) => value === doc.document_type)?.[1] ?? doc.document_type}</td><td>{(doc.size_bytes / 1024).toFixed(1)} КБ</td><td>{doc.extraction_status}</td><td>{doc.candidate_count}</td></tr>)}</tbody></table></div>}
     </section>
     {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2><a className="help-button" href={`${API}/documents/${encodeURIComponent(selected.id)}/file`} target="_blank" rel="noreferrer">Открыть оригинал ↗</a></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
+      {report && <div className="extraction-report">
+        <div className="eyebrow">ПОЛНЫЙ ОБЗОР ДОКУМЕНТА</div>
+        <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
+        <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
+          <article className="report-section" key={key}>
+            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Нужен OCR" : "Не найдено в тексте"}</span></div>
+            <p>{section.note}</p>
+            {section.evidence.length > 0 && <ul>{section.evidence.slice(0, 5).map((item, index) =>
+              <li key={index}><strong>Стр. {item.page}:</strong> {item.excerpt}</li>
+            )}</ul>}
+          </article>
+        )}</div>
+        <div className="form-hint"><strong>Ограничения первого этапа:</strong><ul>{report.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
+      </div>}
       {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат, м</th><th>Страница</th><th>Фрагмент источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
