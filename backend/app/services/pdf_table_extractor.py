@@ -1,5 +1,5 @@
 """Bounded, conservative extraction of tabular evidence from selected PDF pages."""
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import re
 from pathlib import Path
@@ -12,14 +12,14 @@ _PAGE_HINTS = re.compile(
     r"hydrostatic|L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|KM\s*[=:]|tank|sounding|ullage|capacity|"
     r"displacement|deadweight|GZ|righting lever|shear force|bending moment|"
     r"stability criteria|draft",
-    re.IGNORECASE,
+    re.IGNORECASEGNORECASE,
 )
 _KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASE)),
-    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASE)),
-    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASE)),
-    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASE)),
-    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASE)),
+    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASEGNORECASE)),
+    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASEGNORECASE)),
+    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASEGNORECASE)),
+    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASEGNORECASE)),
+    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASEGNORECASE)),
 )
 _LABELS = {
     "hydrostatics": "Гидростатическая таблица",
@@ -109,12 +109,12 @@ def extract_pdf_tables(
                             "rows": rows,
                             "note": "Предпросмотр извлечённой таблицы; заголовки и значения требуют сверки с оригиналом.",
                         })
-                except Exception as exc:  # one malformed page must not abort the report
+                except Exception as exc:  # noqa: BLE001 — isolate malformed pages
                     page_errors.append({
                         "page": page_number,
                         "error": type(exc).__name__,
                     })
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — report parser failure without hiding it
         return {
             "status": "TABLE_EXTRACTION_FAILED",
             "candidate_pages": candidates,
