@@ -49,6 +49,48 @@ _DATASETS: dict[str, dict[str, Any]] = {
         "text_terms": ("loading manual", "loading condition", "operating condition", "deadweight"),
         "table_kinds": ("loading_condition",),
     },
+    "free_surface_moments": {
+        "label": "Моменты свободных поверхностей (FSM)",
+        "text_section": "stability_data",
+        "text_terms": ("free surface", "FSM"),
+        "table_kinds": ("free_surface",),
+    },
+    "draft_corrections": {
+        "label": "Поправки к показаниям осадки",
+        "text_section": "loading_limits_and_conditions",
+        "text_terms": ("draft correction", "draft mark"),
+        "table_kinds": ("draft_corrections",),
+    },
+    "windage": {
+        "label": "Парусность и ветровой кренящий момент",
+        "text_section": "stability_data",
+        "text_terms": ("wind pressure", "heeling moment"),
+        "table_kinds": ("windage",),
+    },
+    "ice_loading": {
+        "label": "Обледенение и дополнительные массы",
+        "text_section": "loading_limits_and_conditions",
+        "text_terms": ("mass of ice", "ice strengthening"),
+        "table_kinds": ("ice_loading",),
+    },
+    "inclining_experiment": {
+        "label": "Креновый опыт и лёгкий вес",
+        "text_section": "stability_data",
+        "text_terms": ("inclining experiment", "slope of tangent"),
+        "table_kinds": ("inclining_experiment",),
+    },
+    "propeller_immersion": {
+        "label": "Погружение гребного винта",
+        "text_section": "loading_limits_and_conditions",
+        "text_terms": ("propeller immersion",),
+        "table_kinds": ("propeller_immersion",),
+    },
+    "trimming_tables": {
+        "label": "Таблицы дифферента и изменения осадки",
+        "text_section": "loading_limits_and_conditions",
+        "text_terms": ("trimming table", "trim correction"),
+        "table_kinds": ("trimming_table",),
+    },
 }
 
 
