@@ -153,12 +153,29 @@ async def upload_vessel_document(
     _DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
     storage_path = _DOCUMENT_STORAGE / stored_name
     try:
-        reader = PdfReader(BytesIO(content), strict=True)
+        # Many otherwise valid PDFs contain minor structural deviations.
+        # Non-strict parsing tolerates these without changing the source bytes.
+        reader = PdfReader(BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            try:
+                decrypted = reader.decrypt("")
+            except Exception:
+                decrypted = 0
+            if not decrypted:
+                raise HTTPException(
+                    status_code=422,
+                    detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
+                )
         pages = [(index + 1, page.extract_text() or "") for index, page in enumerate(reader.pages)]
         if not pages:
-            raise ValueError("PDF не содержит страниц")
+            raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="Не удалось прочитать PDF-документ") from exc
+        raise HTTPException(
+            status_code=422,
+            detail=f"Не удалось обработать структуру PDF ({type(exc).__name__}). Проверьте файл или пересохраните его в PDF.",
+        ) from exc
 
     candidates = extract_principal_particulars(pages)
     has_text = any(text.strip() for _, text in pages)
