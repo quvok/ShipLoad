@@ -29,6 +29,27 @@ class VesselRecord(Base):
     loading_conditions: Mapped[list["LoadingConditionRecord"]] = relationship(
         back_populates="vessel", cascade="all, delete-orphan"
     )
+    tanks: Mapped[list["TankRecord"]] = relationship(back_populates="vessel")
+
+
+class TankRecord(Base):
+    __tablename__ = "tanks"
+    __table_args__ = (
+        UniqueConstraint("vessel_id", "tank_code", name="uq_tank_code_per_vessel"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    vessel_id: Mapped[str] = mapped_column(
+        ForeignKey("vessels.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    tank_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    tank_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    nominal_capacity_m3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrangement_source_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    capacity_source_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    data_status: Mapped[str] = mapped_column(String(32), nullable=False, default="REVIEW_REQUIRED")
+    vessel: Mapped[VesselRecord] = relationship(back_populates="tanks")
 
 
 class LoadingConditionRecord(Base):
@@ -68,6 +89,6 @@ class LoadingItemRecord(Base):
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     mass_kg: Mapped[float] = mapped_column(Float, nullable=False)
     position: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    tank_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tank_id: Mapped[str | None] = mapped_column(ForeignKey("tanks.id", ondelete="RESTRICT"), nullable=True)
     source_reference: Mapped[str] = mapped_column(String(500), nullable=False)
     condition: Mapped[LoadingConditionRecord] = relationship(back_populates="items")
