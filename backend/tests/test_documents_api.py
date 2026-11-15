@@ -4,7 +4,8 @@ from io import BytesIO
 
 from pypdf import PdfWriter
 
-from test_vessels_api import Base, client, engine, vessel_payload
+from test_vessels_api import Base, TestingSession, client, engine, vessel_payload
+from app.models import SourceDocumentRecord
 
 
 def setup_function():
@@ -58,3 +59,121 @@ def test_document_upload_rejects_non_pdf_and_duplicate(tmp_path, monkeypatch):
     assert first.status_code == 201
     duplicate = client.post(url, files={"file": ("copy.pdf", payload, "application/pdf")})
     assert duplicate.status_code == 409
+
+
+
+def _seed_document_with_candidates(vessel_id: str) -> str:
+    document_id = "00000000-0000-0000-0000-000000000123"
+    session = TestingSession()
+    try:
+        session.add(SourceDocumentRecord(
+            id=document_id,
+            vessel_id=vessel_id,
+            original_filename="particulars.pdf",
+            stored_filename="particulars-review.pdf",
+            media_type="application/pdf",
+            size_bytes=100,
+            sha256="a" * 64,
+            document_type="ship_particulars",
+            extraction_status="TEXT_EXTRACTED",
+            extracted_candidates=[
+                {
+                    "field": "loa_m",
+                    "value": 123.4,
+                    "unit": "m",
+                    "page": 2,
+                    "matched_text": "LOA 123.4 m",
+                    "status": "EXTRACTED",
+                },
+                {
+                    "field": "lbp_m",
+                    "value": 111.0,
+                    "unit": "m",
+                    "page": 2,
+                    "matched_text": "LBP 111.0 m",
+                    "status": "EXTRACTED",
+                },
+            ],
+        ))
+        session.commit()
+    finally:
+        session.close()
+    return document_id
+
+
+def test_candidate_approval_creates_immutable_revision_and_audit_record():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Review vessel", "vessel_type": "general_cargo"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    pending = client.get(f"/api/v1/documents/{document_id}/candidates").json()
+    assert pending["candidates"][0]["review_status"] == "PENDING"
+
+    approved = client.post(
+        f"/api/v1/documents/{document_id}/candidates/0/decision",
+        json={
+            "decision": "APPROVE",
+            "reviewer_label": "Старший помощник",
+            "approved_value": 124.0,
+            "comment": "Исправлено после сверки с титульной таблицей.",
+        },
+    )
+    assert approved.status_code == 201
+    assert approved.json()["revision_number"] == 1
+
+    revisions = client.get(f"/api/v1/vessels/{vessel_id}/data-revisions")
+    assert revisions.status_code == 200
+    assert len(revisions.json()) == 1
+    revision = revisions.json()[0]
+    assert revision["values"]["loa_m"] == 124.0
+    assert revision["source_references"]["loa_m"]["page"] == 2
+    assert revision["source_references"]["loa_m"]["proposed_value"] == 123.4
+    assert revision["created_by"] == "Старший помощник"
+
+    reviewed = client.get(f"/api/v1/documents/{document_id}/candidates").json()
+    assert reviewed["candidates"][0]["review_status"] == "APPROVE"
+
+    duplicate = client.post(
+        f"/api/v1/documents/{document_id}/candidates/0/decision",
+        json={"decision": "REJECT", "reviewer_label": "Старший помощник"},
+    )
+    assert duplicate.status_code == 409
+
+
+def test_candidate_rejection_does_not_create_vessel_revision():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Review vessel", "vessel_type": "general_cargo"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/1/decision",
+        json={
+            "decision": "REJECT",
+            "reviewer_label": "Проверяющий",
+            "comment": "Значение относится к другой системе измерений.",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["revision_number"] is None
+    assert client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json() == []
+
+
+def test_candidate_approval_rejects_out_of_range_corrected_value():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Review vessel", "vessel_type": "general_cargo"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/0/decision",
+        json={
+            "decision": "APPROVE",
+            "reviewer_label": "Проверяющий",
+            "approved_value": 1500,
+        },
+    )
+    assert response.status_code == 422
