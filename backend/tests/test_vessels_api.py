@@ -1,0 +1,77 @@
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db import get_session
+from app.main import app
+from app.models import Base
+
+engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base.metadata.create_all(engine)
+
+
+def override_session():
+    session = TestingSession()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+app.dependency_overrides[get_session] = override_session
+client = TestClient(app)
+
+
+def setup_function():
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+
+
+def vessel_payload():
+    return {
+        "name": "Тестовое судно",
+        "vessel_type": "general_cargo",
+        "loa_m": 120,
+        "lbp_m": 110,
+        "moulded_breadth_m": 20,
+        "moulded_depth_m": 10,
+        "coordinate_convention": {
+            "origin_description": "Пересечение основной плоскости и мидель-шпангоута",
+            "x_axis_direction": "positive_forward",
+            "y_axis_direction": "positive_starboard",
+            "z_axis_direction": "positive_up",
+            "vertical_datum_description": "Основная плоскость судна",
+        },
+    }
+
+
+def test_create_and_list_vessels():
+    response = client.post("/api/v1/vessels", json=vessel_payload())
+    assert response.status_code == 201
+    created = response.json()
+    assert created["name"] == "Тестовое судно"
+    assert created["data_status"] == "DRAFT"
+    assert created["id"]
+
+    listed = client.get("/api/v1/vessels")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["id"] == created["id"]
+
+
+def test_get_vessel_by_id():
+    created = client.post("/api/v1/vessels", json=vessel_payload()).json()
+    response = client.get(f"/api/v1/vessels/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["id"] == created["id"]
+
+
+def test_missing_vessel_returns_404():
+    response = client.get("/api/v1/vessels/not-a-vessel")
+    assert response.status_code == 404
