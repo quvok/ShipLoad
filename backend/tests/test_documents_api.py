@@ -1,9 +1,8 @@
-from test_vessels_api import Base, client, engine, vessel_payload
-
 from io import BytesIO
 
-from fastapi.testclient import TestClient
 from pypdf import PdfWriter
+
+from test_vessels_api import Base, client, engine, vessel_payload
 
 
 def _blank_pdf() -> bytes:
