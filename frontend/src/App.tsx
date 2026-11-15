@@ -162,6 +162,13 @@ type ExtractionReport = {
     note: string;
   }>;
   limitations: string[];
+  table_analysis?: {
+    status: string; candidate_pages: number[]; pages_checked: number[];
+    pages_skipped_by_limit: number[]; tables_found: number;
+    tables: { page: number; kind: string; label: string; row_count_preview: number;
+      column_count_preview: number; rows: string[][]; note: string }[];
+    page_errors: { page: number | null; error: string }[]; note: string;
+  };
 };
 
 type ExtractedCandidate = {
@@ -308,14 +315,28 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
         <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
           <article className="report-section" key={key}>
-            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND_WITH_OCR_GAPS" ? "Совпадения + страницы для OCR" : section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Нужен OCR" : "Не найдено в тексте"}</span></div>
+            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : "Не найдено в тексте"}</span></div>
             <p>{section.note}</p>
             {section.evidence.length > 0 && <ul>{section.evidence.slice(0, 5).map((item, index) =>
               <li key={index}><strong>Стр. {item.page}:</strong> {item.excerpt}</li>
             )}</ul>}
           </article>
         )}</div>
-        <div className="form-hint"><strong>Ограничения первого этапа:</strong><ul>{report.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
+        {report.table_analysis && <section className="table-analysis">
+          <div className="report-section-heading"><strong>Структурное извлечение таблиц</strong><span className="draft-tag">{report.table_analysis.tables_found} таблиц</span></div>
+          <p>{report.table_analysis.note}</p>
+          <p className="form-hint">Проверены страницы: {report.table_analysis.pages_checked.length ? report.table_analysis.pages_checked.join(", ") : "нет"}.
+            {report.table_analysis.pages_skipped_by_limit.length > 0 ? ` Пропущены по лимиту: ${report.table_analysis.pages_skipped_by_limit.join(", ")}.` : ""}
+          </p>
+          {report.table_analysis.tables.map((table, index) => <article className="report-section" key={`${table.page}-${index}`}>
+            <div className="report-section-heading"><strong>{table.label}</strong><span className="draft-tag">Стр. {table.page}</span></div>
+            <div className="vessel-table-wrap"><table className="vessel-table"><tbody>
+              {table.rows.slice(0, 12).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell || "—"}</td>)}</tr>)}
+            </tbody></table></div>
+            <p className="form-hint">{table.note}</p>
+          </article>)}
+        </section>}
+        <div className="form-hint"><strong>Ограничения анализа:</strong><ul>{report.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
       </div>}
       {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
