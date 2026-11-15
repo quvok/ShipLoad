@@ -7,6 +7,7 @@ ShipLoad is a development tool until the calculation methods, vessel data and op
 - No operational green/pass status from unreviewed extracted data.
 - No invented default vessel particulars, hydrostatics, tank centres, limits or stability criteria.
 - Preserve units, datum, sign convention and source for every input.
+- A tank identity or nominal capacity is not a calibration table. Do not derive sounding, volume, liquid mass, centre of gravity or free-surface moment from registry metadata.
 - Block calculations when required inputs are missing, ambiguous, stale or outside supported ranges.
 - Display assumptions and warnings next to results, not only in logs.
 - Keep immutable calculation snapshots and audit history.
@@ -16,7 +17,7 @@ ShipLoad is a development tool until the calculation methods, vessel data and op
 ## Validation gates
 
 1. Requirements gate: identify vessel type, approved booklets, coordinate system, calculation method, applicable stability criteria and expected operating envelope.
-2. Data gate: reconcile every imported table and constant against source documents; verify units, ranges, interpolation points and revision.
+2. Data gate: reconcile every imported table and constant against source documents; verify units, ranges, interpolation points and revision. Tank calibration tables and free-surface data require their own reviewed source records.
 3. Numerical gate: compare against independently prepared reference calculations and, where available, the vessel's approved loading computer outputs.
 4. Boundary gate: test table endpoints, interpolation boundaries, invalid inputs, tank partial-fill cases, density changes and unsupported extrapolation.
 5. Integration gate: verify document revision -> loading condition -> result traceability and report reproducibility.
