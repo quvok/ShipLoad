@@ -134,6 +134,16 @@ def test_candidate_approval_creates_immutable_revision_and_audit_record():
 
     reviewed = client.get(f"/api/v1/documents/{document_id}/candidates").json()
     assert reviewed["candidates"][0]["review_status"] == "APPROVE"
+    assert reviewed["candidates"][0]["decision"]["revision_number"] == 1
+
+    second = client.post(
+        f"/api/v1/documents/{document_id}/candidates/1/decision",
+        json={"decision": "APPROVE", "reviewer_label": "Старший помощник"},
+    )
+    assert second.status_code == 201
+    after_second = client.get(f"/api/v1/documents/{document_id}/candidates").json()
+    assert after_second["candidates"][0]["decision"]["revision_number"] == 1
+    assert after_second["candidates"][1]["decision"]["revision_number"] == 2
 
     duplicate = client.post(
         f"/api/v1/documents/{document_id}/candidates/0/decision",
