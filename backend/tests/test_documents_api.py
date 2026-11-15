@@ -12,10 +12,6 @@ def setup_function():
     Base.metadata.create_all(engine)
 
 
-def vessel_payload():
-    return {"name": "Тестовый танкер", "vessel_type": "tanker"}
-
-
 def _blank_pdf() -> bytes:
     output = BytesIO()
     writer = PdfWriter()
@@ -62,8 +58,3 @@ def test_document_upload_rejects_non_pdf_and_duplicate(tmp_path, monkeypatch):
     assert first.status_code == 201
     duplicate = client.post(url, files={"file": ("copy.pdf", payload, "application/pdf")})
     assert duplicate.status_code == 409
-
-
-def setup_function():
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
