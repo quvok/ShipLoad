@@ -209,7 +209,8 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
     event.preventDefault();
     if (!vesselId) return;
     setBusy(true); setError(""); setMessage("");
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       const response = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/documents`, { method: "POST", body: form });
       if (!response.ok) {
@@ -220,7 +221,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       await loadDocuments(vesselId);
       setSelectedDocument(created.id);
       setMessage("Оригинал сохранён. Извлечённые значения доступны для сверки; автоматически они не утверждаются.");
-      (event.currentTarget as HTMLFormElement).reset();
+      formElement.reset();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Ошибка загрузки документа.");
     } finally { setBusy(false); }
