@@ -12,7 +12,8 @@ def _blank_pdf() -> bytes:
     return output.getvalue()
 
 
-def test_upload_pdf_stores_hash_and_marks_scanned_document_for_ocr():
+def test_upload_pdf_stores_hash_and_marks_scanned_document_for_ocr(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.main._DOCUMENT_STORAGE", tmp_path)
     vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
     response = client.post(
         f"/api/v1/vessels/{vessel_id}/documents",
@@ -30,12 +31,17 @@ def test_upload_pdf_stores_hash_and_marks_scanned_document_for_ocr():
     assert listed.status_code == 200
     assert len(listed.json()) == 1
 
+    original = client.get(f"/api/v1/documents/{document['id']}/file")
+    assert original.status_code == 200
+    assert original.content.startswith(b"%PDF-")
+
     candidates = client.get(f"/api/v1/documents/{document['id']}/candidates")
     assert candidates.status_code == 200
     assert candidates.json()["candidates"] == []
 
 
-def test_document_upload_rejects_non_pdf_and_duplicate():
+def test_document_upload_rejects_non_pdf_and_duplicate(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.main._DOCUMENT_STORAGE", tmp_path)
     vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
     url = f"/api/v1/vessels/{vessel_id}/documents"
     assert client.post(url, files={"file": ("notes.txt", b"not pdf", "text/plain")}).status_code == 415
