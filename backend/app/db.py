@@ -2,10 +2,13 @@
 from collections.abc import Generator
 import os
 
+from dotenv import load_dotenv
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+load_dotenv()
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
