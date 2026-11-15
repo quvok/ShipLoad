@@ -233,6 +233,74 @@ async def upload_vessel_document(
     return _document_summary(record)
 
 
+@app.post(
+    "/api/v1/documents/{document_id}/reextract",
+    status_code=status.HTTP_201_CREATED,
+    tags=["documents"],
+)
+def reextract_source_document(
+    document_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Create a new extraction record from the same immutable PDF, preserving prior reviews."""
+    original = session.get(SourceDocumentRecord, document_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    storage_path = (_DOCUMENT_STORAGE / original.stored_filename).resolve()
+    if storage_path.parent != _DOCUMENT_STORAGE.resolve() or not storage_path.is_file():
+        raise HTTPException(status_code=404, detail="Оригинал документа недоступен")
+    try:
+        reader = PdfReader(str(storage_path), strict=False)
+        if reader.is_encrypted:
+            try:
+                decrypted = reader.decrypt("")
+            except (ValueError, TypeError, NotImplementedError):
+                decrypted = 0
+            if not decrypted:
+                raise HTTPException(status_code=422, detail="PDF защищён паролем")
+        with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
+            pages = [
+                (index + 1, page.extract_text() or "")
+                for index, page in enumerate(reader.pages)
+            ]
+        if not pages:
+            raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to re-extract PDF document %s", document_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Не удалось повторно извлечь данные ({type(exc).__name__}: {exc}).",
+        ) from exc
+
+    stem = Path(original.original_filename).stem
+    reanalysis_name = f"{stem} (повторный анализ).pdf"[:255]
+    record = SourceDocumentRecord(
+        id=str(uuid.uuid4()),
+        vessel_id=original.vessel_id,
+        original_filename=reanalysis_name,
+        stored_filename=original.stored_filename,
+        media_type=original.media_type,
+        size_bytes=original.size_bytes,
+        sha256=original.sha256,
+        document_type=original.document_type,
+        extraction_status="TEXT_EXTRACTED" if any(text.strip() for _, text in pages) else "OCR_REQUIRED",
+        extracted_candidates=extract_principal_particulars(pages),
+    )
+    session.add(record)
+    try:
+        session.commit()
+        session.refresh(record)
+    except Exception:
+        session.rollback()
+        raise
+    summary = _document_summary(record)
+    summary["reanalysis_of"] = original.id
+    summary["message"] = "Создан новый результат извлечения. Предыдущий документ и его решения сохранены без изменений."
+    return summary
+
+
 def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
     return {
         "id": record.id,
