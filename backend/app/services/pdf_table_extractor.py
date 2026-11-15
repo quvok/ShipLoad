@@ -44,7 +44,7 @@ def extract_pdf_tables(
     max_candidate_pages: int = 40,
     max_tables_per_page: int = 4,
     max_rows: int = 30,
-    max_columns: int = 20,
+    max_columns: int = 20,\n    max_page_stream_bytes: int = 5 * 1024 * 1024,
 ) -> dict[str, object]:
     """Extract bounded table previews only from pages with relevant text hints.
 
@@ -58,7 +58,7 @@ def extract_pdf_tables(
     selected_pages = candidates[:max_candidate_pages]
     skipped_pages = candidates[max_candidate_pages:]
     tables: list[dict[str, object]] = []
-    page_errors: list[dict[str, object]] = []
+    page_errors: list[dict[str, object]] = []\n    pages_skipped_complex: list[int] = []
 
     try:
         with pdfplumber.open(str(pdf_path), laparams=None) as pdf:
@@ -67,6 +67,13 @@ def extract_pdf_tables(
                 if page_number < 1 or page_number > page_count:
                     continue
                 page = pdf.pages[page_number - 1]
+                # Some ship PDFs contain enormous vector drawing streams (e.g. tank plans).
+                # Do not let table parsing monopolize the local API process on those pages.
+                contents = getattr(page.page_obj, "contents", []) or []
+                stream_size = sum(len(stream.get_data()) for stream in contents)
+                if stream_size > max_page_stream_bytes:
+                    pages_skipped_complex.append(page_number)
+                    continue
                 try:
                     found = page.extract_tables({
                         "vertical_strategy": "lines",
@@ -109,6 +116,7 @@ def extract_pdf_tables(
             "candidate_pages": candidates,
             "pages_checked": [],
             "pages_skipped_by_limit": skipped_pages,
+            "pages_skipped_complex": pages_skipped_complex,
             "tables_found": 0,
             "tables": [],
             "page_errors": [{"page": None, "error": type(exc).__name__}],
@@ -120,6 +128,7 @@ def extract_pdf_tables(
         "candidate_pages": candidates,
         "pages_checked": selected_pages,
         "pages_skipped_by_limit": skipped_pages,
+        "pages_skipped_complex": pages_skipped_complex,
         "tables_found": len(tables),
         "tables": tables,
         "page_errors": page_errors,
