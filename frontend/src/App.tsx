@@ -174,8 +174,8 @@ type ExtractionReport = {
 type ExtractedCandidate = {
   field: string; value: number; unit: string; page: number; matched_text: string; status: string;
   evidence?: { page: number; matched_text: string }[];
-  candidate_index: number; review_status: string;
-  decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null } | null;
+  candidate_index: number; candidate_indices?: number[]; review_status: string;
+  decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null; revision_numbers?: number[] } | null;
 };
 const documentTypes = [
   ["ship_particulars", "Основные характеристики судна"],
@@ -384,7 +384,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
           <td>{item.review_status === "PENDING" ? <div className="candidate-actions">
             <button className="secondary-button" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "APPROVE")}>{reviewingCandidate === item.candidate_index ? "Сохранение…" : "Подтвердить"}</button>
             <button className="candidate-reject" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "REJECT")}>Отклонить</button>
-          </div> : <span className={item.review_status === "APPROVE" ? "review-approved" : "review-rejected"}>{item.review_status === "APPROVE" ? "Подтверждено" : "Отклонено"}{item.decision?.revision_number ? ` · ревизия ${item.decision.revision_number}` : ""}<small>{item.decision?.reviewer_label}</small></span>}</td>
+          </div> : <span className={item.review_status === "APPROVE" ? "review-approved" : "review-rejected"}>{item.review_status === "APPROVE" ? "Подтверждено" : "Отклонено"}{item.decision?.revision_numbers?.length ? ` · ревизии ${item.decision.revision_numbers.join(", ")}` : item.decision?.revision_number ? ` · ревизия ${item.decision.revision_number}` : ""}<small>{item.decision?.reviewer_label}</small></span>}</td>
         </tr>)}</tbody></table></div>
       </>}
       <p className="form-hint">Подтверждение создаёт новую неизменяемую ревизию исходных данных с привязкой к PDF, странице, фрагменту, исходному и проверенному значению. Профиль судна не перезаписывается. Метка проверяющего пока не является аутентификацией: вход и персональные учётные записи ещё не реализованы. Решения не включают координатную систему и не разрешают эксплуатационные расчёты.</p>
