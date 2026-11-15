@@ -282,7 +282,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
   }
   const selected = documents.find(doc => doc.id === selectedDocument);
   return <>
-    <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите оригиналы PDF. Система извлечёт только кандидаты значений и сохранит ссылки на страницы источника.</p></div></div>
+    <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите один PDF. Система анализирует весь документ и формирует обзор найденных разделов и значений с привязкой к страницам.</p></div></div>
     <div className="notice"><span className="notice-icon">!</span><div><strong>Распознавание не означает подтверждение</strong><p>Файлы хранятся в локальной папке backend вне публичной директории. Кандидаты необходимо сверить с оригиналом. Сканированные документы пока требуют отдельного OCR-модуля.</p></div></div>
     {apiState !== "online" && <div className="inline-alert error">Для работы с документами необходимо подключение к локальному API.</div>}
     {error && <div className="inline-alert error">{error}</div>}{message && <div className="inline-alert success">{message}</div>}
@@ -291,7 +291,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       <form onSubmit={upload}>
         <div className="form-grid">
           <label>Судно<select value={vesselId} onChange={event => setVesselId(event.target.value)} required><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-          <label>Тип документа<select name="document_type" defaultValue="other">{documentTypes.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <input type="hidden" name="document_type" value="other" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
           <label>Файл PDF<input name="file" type="file" accept="application/pdf,.pdf" required /></label>
         </div>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Загрузка…" : "Загрузить и извлечь данные"}</button></div>
