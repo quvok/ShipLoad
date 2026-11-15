@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -116,3 +116,54 @@ class SourceDocumentRecord(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
     vessel: Mapped[VesselRecord] = relationship()
+
+
+class VesselDataRevisionRecord(Base):
+    """Immutable, reviewed snapshot of vessel particulars and their provenance."""
+
+    __tablename__ = "vessel_data_revisions"
+    __table_args__ = (
+        UniqueConstraint("vessel_id", "revision_number", name="uq_vessel_data_revision_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    vessel_id: Mapped[str] = mapped_column(
+        ForeignKey("vessels.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    values: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source_references: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    change_summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class DocumentCandidateDecisionRecord(Base):
+    """Append-only decision record for one extracted candidate."""
+
+    __tablename__ = "document_candidate_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "candidate_index", name="uq_document_candidate_decision"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    candidate_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    field: Mapped[str] = mapped_column(String(80), nullable=False)
+    proposed_value: Mapped[float] = mapped_column(Float, nullable=False)
+    approved_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    page: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_text: Mapped[str] = mapped_column(Text, nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reviewer_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
