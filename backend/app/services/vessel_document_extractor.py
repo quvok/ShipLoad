@@ -104,7 +104,7 @@ _SECTION_LABELS = {
 def _term_matches_line(term: str, lowered_line: str) -> bool:
     normalized = term.casefold()
     if len(normalized) <= 3 and normalized.isalpha():
-        return re.search(r"\\b" + re.escape(normalized) + r"\\b", lowered_line) is not None
+        return re.search(r"\b" + re.escape(normalized) + r"\b", lowered_line) is not None
     return normalized in lowered_line
 
 
