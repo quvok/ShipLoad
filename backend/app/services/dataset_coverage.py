@@ -10,7 +10,6 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-
 _DATASETS: dict[str, dict[str, Any]] = {
     "principal_particulars": {
         "label": "Главные размерения",
