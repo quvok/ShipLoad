@@ -29,8 +29,8 @@ from app.models import (
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
-from app.services.pdf_table_extractor import extract_pdf_tables
 from app.services.dataset_coverage import build_dataset_coverage
+from app.services.pdf_table_extractor import extract_pdf_tables
 from app.services.vessel_document_extractor import (
     build_extraction_report,
     extract_principal_particulars,
