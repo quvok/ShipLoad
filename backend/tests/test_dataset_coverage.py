@@ -68,7 +68,6 @@ def test_text_evidence_is_not_mistaken_for_approved_data():
     assert "подтверждёнными" in coordinate["note"]
 
 
-
 def test_skipped_complex_pages_mark_dataset_coverage_incomplete():
     coverage = build_dataset_coverage(
         {"sections": {"tanks_and_capacities": {"evidence": []}}},
@@ -103,7 +102,6 @@ def test_generic_loading_evidence_is_not_misreported_as_strength_data():
     loading = _dataset(coverage, "loading_conditions")
     assert strength["status"] == "NO_EVIDENCE_FOUND_NOT_PROVEN_ABSENT"
     assert loading["status"] == "TEXT_EVIDENCE_REVIEW_REQUIRED"
-
 
 
 def test_specialized_vessel_datasets_are_reported_separately():
