@@ -152,6 +152,8 @@ type SourceDocument = {
 };
 type ExtractedCandidate = {
   field: string; value: number; unit: string; page: number; matched_text: string; status: string;
+  candidate_index: number; review_status: string;
+  decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null } | null;
 };
 const documentTypes = [
   ["ship_particulars", "Основные характеристики судна"],
@@ -174,6 +176,9 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [reviewerLabel, setReviewerLabel] = useState("");
+  const [correctedValues, setCorrectedValues] = useState<Record<number, string>>({});
+  const [reviewingCandidate, setReviewingCandidate] = useState<number | null>(null);
   const loadDocuments = useCallback(async (id: string) => {
     if (!id) { setDocuments([]); setCandidates([]); setSelectedDocument(""); return; }
     const response = await fetch(`${API}/vessels/${encodeURIComponent(id)}/documents`);
@@ -215,6 +220,40 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       .then(data => setCandidates(data.candidates))
       .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка получения кандидатов."));
   }, [selectedDocument]);
+  async function reviewCandidate(item: ExtractedCandidate, decision: "APPROVE" | "REJECT") {
+    if (reviewerLabel.trim().length < 2) {
+      setError("Укажите имя или должность проверяющего (не менее 2 символов).");
+      return;
+    }
+    setReviewingCandidate(item.candidate_index); setError(""); setMessage("");
+    const payload: { decision: string; reviewer_label: string; approved_value?: number } = {
+      decision,
+      reviewer_label: reviewerLabel.trim(),
+    };
+    if (decision === "APPROVE") {
+      const value = Number(correctedValues[item.candidate_index] ?? item.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        setError("Укажите корректное положительное значение в метрах.");
+        setReviewingCandidate(null);
+        return;
+      }
+      payload.approved_value = value;
+    }
+    try {
+      const response = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates/${item.candidate_index}/decision`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось сохранить решение.");
+      const refreshed = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates`);
+      if (!refreshed.ok) throw new Error("Решение сохранено, но не удалось обновить список кандидатов.");
+      const data = await refreshed.json() as { candidates: ExtractedCandidate[] };
+      setCandidates(data.candidates);
+      setMessage(body.message);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ошибка при проверке кандидата.");
+    } finally { setReviewingCandidate(null); }
+  }
   const selected = documents.find(doc => doc.id === selectedDocument);
   return <>
     <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите оригиналы PDF. Система извлечёт только кандидаты значений и сохранит ссылки на страницы источника.</p></div></div>
@@ -238,9 +277,19 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Файл</th><th>Тип</th><th>Объём</th><th>Извлечение</th><th>Кандидаты</th></tr></thead><tbody>{documents.map(doc => <tr key={doc.id} onClick={() => setSelectedDocument(doc.id)} className={selectedDocument === doc.id ? "selected-row" : ""}><td><strong>{doc.original_filename}</strong><small>SHA-256: {doc.sha256.slice(0,16)}…</small></td><td>{documentTypes.find(([value]) => value === doc.document_type)?.[1] ?? doc.document_type}</td><td>{(doc.size_bytes / 1024).toFixed(1)} КБ</td><td>{doc.extraction_status}</td><td>{doc.candidate_count}</td></tr>)}</tbody></table></div>}
     </section>
     {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2><a className="help-button" href={`${API}/documents/${encodeURIComponent(selected.id)}/file`} target="_blank" rel="noreferrer">Открыть оригинал ↗</a></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
-      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> :
-        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Найденное значение</th><th>Страница</th><th>Фрагмент источника</th><th>Статус</th></tr></thead><tbody>{candidates.map((item,index) => <tr key={index}><td>{candidateLabels[item.field] ?? item.field}</td><td><strong>{item.value} {item.unit}</strong></td><td>{item.page}</td><td>{item.matched_text}</td><td>{item.status}</td></tr>)}</tbody></table></div>}
-      <p className="form-hint">Сейчас значения только отображаются для сверки. Они не переносятся в профиль и не используются в расчётах.</p>
+      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
+        <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат, м</th><th>Страница</th><th>Фрагмент источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
+          <td>{candidateLabels[item.field] ?? item.field}</td>
+          <td><input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} disabled={item.review_status !== "PENDING"} /></td>
+          <td>{item.page}</td><td>{item.matched_text}</td>
+          <td>{item.review_status === "PENDING" ? <div className="candidate-actions">
+            <button className="secondary-button" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "APPROVE")}>{reviewingCandidate === item.candidate_index ? "Сохранение…" : "Подтвердить"}</button>
+            <button className="candidate-reject" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "REJECT")}>Отклонить</button>
+          </div> : <span className={item.review_status === "APPROVE" ? "review-approved" : "review-rejected"}>{item.review_status === "APPROVE" ? "Подтверждено" : "Отклонено"}{item.decision?.revision_number ? ` · ревизия ${item.decision.revision_number}` : ""}<small>{item.decision?.reviewer_label}</small></span>}</td>
+        </tr>)}</tbody></table></div>
+      </>}
+      <p className="form-hint">Подтверждение создаёт новую неизменяемую ревизию исходных данных с привязкой к PDF, странице, фрагменту, исходному и проверенному значению. Профиль судна не перезаписывается. Метка проверяющего пока не является аутентификацией: вход и персональные учётные записи ещё не реализованы. Решения не включают координатную систему и не разрешают эксплуатационные расчёты.</p>
     </section>}
   </>;
 }
