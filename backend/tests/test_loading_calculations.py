@@ -122,3 +122,24 @@ def test_non_positive_corrected_gm_is_rejected():
             seawater_density_t_m3=1.0,
             hydrostatic_table=hydro,
         )
+
+
+def test_forward_longitudinal_moment_adds_only_loads_forward_of_midship():
+    lightship = Lightship(1000.0, 50.0, 0.0, 10.0, 1_386_360.0)
+    hydro = [
+        HydrostaticPoint(100.0, 5.0, 40.0, 50.0, 20.0, 100.0),
+        HydrostaticPoint(200.0, 6.0, 40.0, 50.0, 20.0, 100.0),
+    ]
+    result = calculate_loading_condition(
+        lightship=lightship,
+        items=[
+            WeightItem("Forward load", 100.0, 200.0, 0.0, 5.0),
+            WeightItem("Aft load", 50.0, 20.0, 0.0, 5.0),
+        ],
+        lbp_m=100.0,
+        seawater_density_t_m3=1.0,
+        hydrostatic_table=hydro,
+    )
+    assert result["forward_strength_moment_tm"] == pytest.approx(
+        1_386_360.0 + 100.0 * (200.0 - 50.0)
+    )
