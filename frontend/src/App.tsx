@@ -17,7 +17,9 @@ const vesselTypes: { value: VesselType; label: string }[] = [
   { value: "bulk_carrier", label: "Балкер" }, { value: "tanker", label: "Танкер" },
   { value: "multipurpose", label: "Многоцелевое судно" }, { value: "other", label: "Другое" },
 ];
-const API = "/api/v1";
+const API = window.location.hostname === "quvok.github.io"
+  ? "http://127.0.0.1:8000/api/v1"
+  : "/api/v1";
 
 function App() {
   const [active, setActive] = useState<NavKey>("overview");
