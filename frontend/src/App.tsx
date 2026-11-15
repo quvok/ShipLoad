@@ -87,7 +87,7 @@ function App() {
       <main className="main">
         <header className="topbar"><div><span className="breadcrumb">Рабочая область</span><span className="slash">/</span><strong>{navigation.find((item) => item.key === active)?.label}</strong></div><div className="topbar-right"><span className="env-tag">РАЗРАБОТКА</span><a className="help-button" href="https://github.com/quvok/ShipLoad" target="_blank" rel="noreferrer">Репозиторий ↗</a></div></header>
         <section className="content">
-          {active === "vessels" ? (
+          {active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "vessels" ? (
             <VesselsPage vessels={vessels} apiState={apiState} showForm={showForm} setShowForm={setShowForm}
               onSubmit={createVessel} loading={loading} error={error} success={success} onRefresh={loadVessels} />
           ) : (
@@ -160,6 +160,97 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
     </section>
   </>;
 }
+
+type LoadingSummary = { id: string; name: string; status: string; item_count: number; created_at: string };
+function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checking" | "online" | "offline" }) {
+  const [vesselId, setVesselId] = useState("");
+  const [records, setRecords] = useState<LoadingSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!vesselId) { setRecords([]); return; }
+    let cancelled = false;
+    fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/loading-conditions`)
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось получить загрузочные условия.");
+        return await response.json() as LoadingSummary[];
+      })
+      .then(data => { if (!cancelled) setRecords(data); })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Ошибка загрузки."); });
+    return () => { cancelled = true; };
+  }, [vesselId]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setNotice(""); setBusy(true);
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      vessel_id: vesselId,
+      name: String(form.get("condition_name") ?? "").trim(),
+      vessel_data_revision: String(form.get("revision") ?? "").trim(),
+      notes: String(form.get("notes") ?? "").trim() || null,
+      items: [{
+        item_id: String(form.get("item_id") ?? "").trim(),
+        description: String(form.get("description") ?? "").trim(),
+        kind: form.get("kind"),
+        mass_kg: Number(form.get("mass_kg")),
+        position: {
+          x_m: Number(form.get("x_m")), y_m: Number(form.get("y_m")), z_m: Number(form.get("z_m")),
+          position_source: String(form.get("position_source") ?? "").trim(),
+        },
+        source_reference: String(form.get("source_reference") ?? "").trim(),
+      }],
+    };
+    try {
+      const response = await fetch(`${API}/loading-conditions`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.detail === "string" ? body.detail : "Сервер отклонил данные. Проверьте поля и единицы.");
+      }
+      setNotice("Загрузочное условие сохранено как REVIEW_REQUIRED. Расчёты не выполнялись.");
+      const refreshed = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/loading-conditions`);
+      if (refreshed.ok) setRecords(await refreshed.json() as LoadingSummary[]);
+      (event.currentTarget as HTMLFormElement).reset();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось сохранить запись.");
+    } finally { setBusy(false); }
+  }
+
+  return <>
+    <div className="page-heading"><div><div className="eyebrow">ИСХОДНЫЕ ДАННЫЕ ЗАГРУЗКИ</div><h1>Загрузочные условия</h1><p>Сохранение масс и исходных положений. Эта форма не выполняет расчёт водоизмещения или остойчивости.</p></div></div>
+    <div className="notice"><span className="notice-icon">!</span><div><strong>Только черновой ввод</strong><p>В этой версии доступны твёрдые нагрузки с заданными координатами. Танки, жидкие нагрузки, плотности и свободные поверхности ещё не реализованы.</p></div></div>
+    {apiState !== "online" && <div className="inline-alert error">Нет подключения к локальному API. Запустите backend и примените миграции Alembic.</div>}
+    {error && <div className="inline-alert error">{error}</div>}{notice && <div className="inline-alert success">{notice}</div>}
+    <section className="panel vessel-form-panel">
+      <div className="panel-heading"><div><div className="eyebrow">НОВАЯ ЗАПИСЬ</div><h2>Создать загрузочное условие</h2></div></div>
+      {vessels.length === 0 ? <div className="empty-state"><strong>Сначала зарегистрируйте судно</strong><p>Загрузочное условие должно быть связано с конкретным профилем судна.</p></div> : <form onSubmit={submit}>
+        <div className="form-grid">
+          <label>Судно<select required value={vesselId} onChange={event => setVesselId(event.target.value)}><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+          <label>Название условия<input name="condition_name" required maxLength={120} placeholder="Например, Перед выходом из порта" /></label>
+          <label>Версия исходных данных судна<input name="revision" required maxLength={80} placeholder="Идентификатор ревизии / черновика" /></label>
+          <label>Идентификатор нагрузки<input name="item_id" required maxLength={80} placeholder="Например, cargo-001" /></label>
+          <label>Описание нагрузки<input name="description" required maxLength={240} placeholder="Описание по грузовому плану" /></label>
+          <label>Тип нагрузки<select name="kind" defaultValue="cargo"><option value="cargo">Груз</option><option value="stores">Судовые запасы</option><option value="crew_and_effects">Экипаж и багаж</option><option value="other">Другое</option></select></label>
+          <label>Масса, кг<input name="mass_kg" type="number" min="0.001" step="0.001" required /></label>
+          <label>Координата X, м<input name="x_m" type="number" step="0.001" required /></label>
+          <label>Координата Y, м<input name="y_m" type="number" step="0.001" required /></label>
+          <label>Координата Z, м<input name="z_m" type="number" step="0.001" required /></label>
+          <label>Источник координат<input name="position_source" required minLength={3} maxLength={500} placeholder="План размещения, шпангоут / отметка" /></label>
+          <label>Источник массы<input name="source_reference" required minLength={3} maxLength={500} placeholder="Грузовой манифест, накладная, ведомость" /></label>
+        </div>
+        <label className="notes-label">Примечание<textarea name="notes" maxLength={2000} rows={2} placeholder="Необязательное примечание" /></label>
+        <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Сохранение…" : "Сохранить черновик"}</button></div>
+      </form>}
+    </section>
+    <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ИСТОРИЯ</div><h2>Сохранённые условия</h2></div></div>
+      {!vesselId ? <div className="empty-state"><p>Выберите судно, чтобы просмотреть его загрузочные условия.</p></div> : records.length === 0 ? <div className="empty-state"><strong>Записей пока нет</strong><p>Создайте первое черновое загрузочное условие.</p></div> :
+      <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Версия данных</th><th>Строк нагрузки</th><th>Статус</th></tr></thead><tbody>{records.map(record => <tr key={record.id}><td><strong>{record.name}</strong><small>{record.id}</small></td><td>{record.status}</td><td>{record.item_count}</td><td><span className="draft-tag">{record.status}</span></td></tr>)}</tbody></table></div>}
+    </section>
+  </>;
+}
+
 function AxisSelect({ name, label, options }: { name: string; label: string; options: [string,string][] }) {
   return <label>{label}<select name={name} required defaultValue=""><option value="" disabled>Выберите по документации</option>{options.map(([value,text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
 }
