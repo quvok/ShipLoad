@@ -310,6 +310,9 @@ def decide_document_candidate(
     )
     if existing is not None:
         raise HTTPException(status_code=409, detail="Решение по кандидату уже зафиксировано")
+    reviewer_label = request.reviewer_label.strip()
+    if len(reviewer_label) < 2:
+        raise HTTPException(status_code=422, detail="Укажите имя или должность проверяющего")
     candidate = document.extracted_candidates[candidate_index]
     field = candidate.get("field")
     allowed_limits = {
@@ -339,7 +342,7 @@ def decide_document_candidate(
         page=int(candidate["page"]),
         matched_text=str(candidate["matched_text"]),
         decision=request.decision,
-        reviewer_label=request.reviewer_label.strip(),
+        reviewer_label=reviewer_label,
         comment=request.comment.strip() if request.comment else None,
     )
     session.add(decision)
@@ -355,6 +358,10 @@ def decide_document_candidate(
         values = dict(latest.values) if latest else {}
         sources = dict(latest.source_references) if latest else {}
         values[field] = approved_value
+        if values.get("lbp_m") is not None and values.get("loa_m") is not None and values["lbp_m"] > values["loa_m"]:
+            raise HTTPException(status_code=422, detail="LBP не может превышать LOA в одной ревизии")
+        if values.get("moulded_breadth_m") is not None and values.get("loa_m") is not None and values["moulded_breadth_m"] > values["loa_m"]:
+            raise HTTPException(status_code=422, detail="Ширина B не может превышать LOA в одной ревизии")
         sources[field] = {
             "document_id": document.id,
             "filename": document.original_filename,
