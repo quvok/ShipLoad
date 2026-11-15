@@ -72,6 +72,35 @@ def extract_principal_particulars(pages: list[tuple[int, str]]) -> list[dict[str
     return candidates
 
 
+def classify_document_type(
+    pages: list[tuple[int, str]],
+    *,
+    filename: str | None = None,
+) -> str:
+    """Classify a PDF from explicit document headings, conservatively.
+
+    Stability information takes precedence because it commonly contains
+    principal particulars, tank plans, and general-arrangement references.
+    """
+    text = "\n".join(page_text for _, page_text in pages).casefold()
+    filename_text = (filename or "").casefold()
+    if any(term in text for term in (
+        "stability information", "information on stability", "information of stability",
+        "stability booklet", "intact stability booklet", "информация об остойчивости",
+    )) or "информация об остойчивости" in filename_text or "stability booklet" in filename_text:
+        return "stability_booklet"
+    if any(term in text for term in ("general arrangement", "общий вид", "общее расположение")) or "general arrangement" in filename_text:
+        return "general_arrangement"
+    if any(term in text for term in ("lines plan", "lines drawing", "теоретический чертёж", "теоретический чертеж")) or "lines plan" in filename_text:
+        return "lines_plan"
+    if any(term in text for term in (
+        "principal particulars", "ship's particulars", "vessel particulars",
+        "основные характеристики судна", "главные размерения",
+    )) or any(term in filename_text for term in ("principal particulars", "ship particulars")):
+        return "ship_particulars"
+    return "other"
+
+
 _REPORT_SECTIONS: dict[str, tuple[str, ...]] = {
     "principal_particulars": (
         "LOA", "LBP", "length overall", "length between perpendiculars",

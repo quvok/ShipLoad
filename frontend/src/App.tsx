@@ -342,7 +342,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       <form onSubmit={upload}>
         <div className="form-grid">
           <label>Судно<select value={vesselId} onChange={event => setVesselId(event.target.value)} required><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-          <input type="hidden" name="document_type" value="other" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
+          <input type="hidden" name="document_type" value="auto" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
           <label>Файл PDF<input name="file" type="file" accept="application/pdf,.pdf" required /></label>
         </div>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Загрузка…" : "Загрузить и извлечь данные"}</button></div>
@@ -387,7 +387,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
           <p>{report.table_analysis.note}</p>
           <p className="form-hint">Проверены страницы: {report.table_analysis.pages_checked.length ? report.table_analysis.pages_checked.join(", ") : "нет"}.
             {report.table_analysis.pages_skipped_by_limit.length > 0 ? ` Пропущены по лимиту страниц: ${report.table_analysis.pages_skipped_by_limit.join(", ")}.` : ""}
-            {report.table_analysis.pages_skipped_complex?.length > 0 ? ` Сложные векторные страницы пропущены ради ограничения нагрузки: ${report.table_analysis.pages_skipped_complex.join(", ")}.` : ""}
+            {report.table_analysis.pages_skipped_complex?.length > 0 ? ` Структура таблиц на сложных векторных страницах не извлекалась (${report.table_analysis.pages_skipped_complex.join(", ")}); текстовый слой этих страниц входит в общий обзор документа, схемы требуют визуальной проверки.` : ""}
           </p>
           {report.table_analysis.tables.map((table, index) => <article className="report-section" key={`${table.page}-${index}`}>
             <div className="report-section-heading"><strong>{table.label}</strong><span className="draft-tag">Стр. {table.page}</span></div>

@@ -33,6 +33,7 @@ from app.services.dataset_coverage import build_dataset_coverage
 from app.services.pdf_table_extractor import extract_pdf_tables
 from app.services.vessel_document_extractor import (
     build_extraction_report,
+    classify_document_type,
     extract_principal_particulars,
 )
 
@@ -132,7 +133,7 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
 
 _DOCUMENT_STORAGE = Path(__file__).resolve().parents[1] / "data" / "documents"
 _MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
-_ALLOWED_DOCUMENT_TYPES = {"ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
+_ALLOWED_DOCUMENT_TYPES = {"auto", "ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
 
 
 @app.post(
@@ -144,7 +145,7 @@ async def upload_vessel_document(
     vessel_id: str,
     session: Annotated[Session, Depends(get_session)],
     file: Annotated[UploadFile, File()],
-    document_type: Annotated[str, Form()] = "other",
+    document_type: Annotated[str, Form()] = "auto",
 ) -> dict[str, object]:
     """Store an immutable PDF and extract traceable review candidates only."""
     if session.get(VesselRecord, vessel_id) is None:
@@ -219,6 +220,10 @@ async def upload_vessel_document(
         ) from exc
 
     candidates = extract_principal_particulars(pages)
+    resolved_document_type = (
+        classify_document_type(pages, filename=original_name)
+        if document_type == "auto" else document_type
+    )
     has_text = any(text.strip() for _, text in pages)
     extraction_status = "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
     storage_path.write_bytes(content)
@@ -230,7 +235,7 @@ async def upload_vessel_document(
         media_type="application/pdf",
         size_bytes=len(content),
         sha256=digest,
-        document_type=document_type,
+        document_type=resolved_document_type,
         extraction_status=extraction_status,
         extracted_candidates=candidates,
     )
@@ -246,6 +251,11 @@ async def upload_vessel_document(
 
 
 def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
+    document_type = record.document_type
+    if document_type == "other":
+        # Legacy uploads were stored as "other" before automatic classification.
+        # Use a strong filename heading as a display fallback without mutating the record.
+        document_type = classify_document_type([], filename=record.original_filename)
     return {
         "id": record.id,
         "vessel_id": record.vessel_id,
@@ -253,7 +263,7 @@ def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
         "media_type": record.media_type,
         "size_bytes": record.size_bytes,
         "sha256": record.sha256,
-        "document_type": record.document_type,
+        "document_type": document_type,
         "extraction_status": record.extraction_status,
         "candidate_count": len({
             (item.get("field"), item.get("value"), item.get("unit"))
