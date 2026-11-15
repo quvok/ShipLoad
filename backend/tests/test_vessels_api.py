@@ -77,6 +77,78 @@ def test_missing_vessel_returns_404():
     assert response.status_code == 404
 
 
+def tank_payload():
+    return {
+        "tank_code": "WB-1P",
+        "name": "Левый балластный танк № 1",
+        "tank_type": "ballast",
+        "nominal_capacity_m3": 850.0,
+        "arrangement_source_reference": "План расположения танков, лист 3",
+        "capacity_source_reference": "Таблица вместимости танков, лист 12",
+    }
+
+
+def test_create_and_list_tanks():
+    vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
+    created = client.post(
+        f"/api/v1/vessels/{vessel_id}/tanks",
+        json=tank_payload(),
+    )
+    assert created.status_code == 201
+    assert created.json()["tank_code"] == "WB-1P"
+    assert created.json()["data_status"] == "REVIEW_REQUIRED"
+    assert created.json()["nominal_capacity_m3"] == 850.0
+
+    listed = client.get(f"/api/v1/vessels/{vessel_id}/tanks")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+
+
+def test_tank_code_must_be_unique_per_vessel():
+    vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
+    url = f"/api/v1/vessels/{vessel_id}/tanks"
+    assert client.post(url, json=tank_payload()).status_code == 201
+    assert client.post(url, json=tank_payload()).status_code == 409
+
+
+def test_loading_condition_requires_tank_from_same_vessel():
+    vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
+    payload = loading_condition_payload(vessel_id)
+    payload["items"] = [{
+        "item_id": "ballast-001",
+        "description": "Балласт в танке WB-1P",
+        "kind": "ballast",
+        "mass_kg": 500000,
+        "tank_id": "missing-tank-id",
+        "source_reference": "Ведомость замеров танков, запись 1",
+    }]
+    response = client.post("/api/v1/loading-conditions", json=payload)
+    assert response.status_code == 422
+
+
+def test_liquid_item_must_match_registered_tank_type():
+    vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
+    tank = tank_payload()
+    tank["tank_type"] = "fuel_oil"
+    tank["nominal_capacity_m3"] = 400
+    tank["capacity_source_reference"] = "Таблица вместимости, лист 8"
+    tank_id = client.post(
+        f"/api/v1/vessels/{vessel_id}/tanks",
+        json=tank,
+    ).json()["id"]
+    payload = loading_condition_payload(vessel_id)
+    payload["items"] = [{
+        "item_id": "ballast-001",
+        "description": "Балластная нагрузка",
+        "kind": "ballast",
+        "mass_kg": 500000,
+        "tank_id": tank_id,
+        "source_reference": "Ведомость замеров танков, запись 1",
+    }]
+    response = client.post("/api/v1/loading-conditions", json=payload)
+    assert response.status_code == 422
+
+
 def loading_condition_payload(vessel_id):
     return {
         "vessel_id": vessel_id,
