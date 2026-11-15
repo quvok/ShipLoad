@@ -1,3 +1,5 @@
+# ruff: noqa: I001
+
 from io import BytesIO
 
 from fastapi.testclient import TestClient
