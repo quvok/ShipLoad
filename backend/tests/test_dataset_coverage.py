@@ -66,3 +66,40 @@ def test_text_evidence_is_not_mistaken_for_approved_data():
     assert coordinate["status"] == "TEXT_EVIDENCE_REVIEW_REQUIRED"
     assert coordinate["review_required"] is True
     assert "подтверждёнными" in coordinate["note"]
+
+
+
+def test_skipped_complex_pages_mark_dataset_coverage_incomplete():
+    coverage = build_dataset_coverage(
+        {"sections": {"tanks_and_capacities": {"evidence": []}}},
+        {
+            "status": "NO_TABLE_PREVIEWS_FOUND",
+            "tables": [],
+            "pages_skipped_complex": [8],
+            "pages_skipped_by_limit": [],
+            "page_errors": [],
+        },
+    )
+
+    tanks = _dataset(coverage, "compartment_registry")
+    assert tanks["status"] == "EXTRACTION_INCOMPLETE"
+
+
+def test_generic_loading_evidence_is_not_misreported_as_strength_data():
+    coverage = build_dataset_coverage(
+        {
+            "sections": {
+                "loading_limits_and_conditions": {
+                    "evidence": [
+                        {"page": 3, "matched_terms": ["deadweight"], "excerpt": "Deadweight 10000 t"}
+                    ]
+                }
+            }
+        },
+        {"status": "NO_TABLE_PREVIEWS_FOUND", "tables": []},
+    )
+
+    strength = _dataset(coverage, "longitudinal_strength")
+    loading = _dataset(coverage, "loading_conditions")
+    assert strength["status"] == "NO_EVIDENCE_FOUND_NOT_PROVEN_ABSENT"
+    assert loading["status"] == "TEXT_EVIDENCE_REVIEW_REQUIRED"
