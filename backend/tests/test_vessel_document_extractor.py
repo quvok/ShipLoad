@@ -25,3 +25,31 @@ def test_does_not_infer_dimensions_without_explicit_units():
 def test_coordinate_convention_is_never_guessed():
     text = "Origin AP, baseline, positive X forward, positive Y starboard, positive Z up"
     assert extract_coordinate_convention([(1, text)]) == []
+
+def test_document_report_indexes_multiple_information_groups_with_pages():
+    from app.services.vessel_document_extractor import build_extraction_report
+
+    pages = [
+        (2, "Principal particulars: LOA 299.0 m and LBP 283.1 m"),
+        (18, "BALLAST TANK 1 P capacity 1250 m3; sounding table"),
+        (42, "Hydrostatic particulars: TPC 82.4; LCB 120.2"),
+        (43, "GZ curve and free surface correction FSM"),
+    ]
+    report = build_extraction_report(pages)
+
+    assert report["page_count"] == 4
+    assert report["pages_with_text"] == 4
+    assert report["sections"]["principal_particulars"]["evidence"][0]["page"] == 2
+    assert report["sections"]["tanks_and_capacities"]["evidence"][0]["page"] == 18
+    assert report["sections"]["hydrostatics"]["evidence"][0]["page"] == 42
+    assert report["sections"]["stability_data"]["evidence"][0]["page"] == 43
+    assert report["sections"]["tanks_and_capacities"]["status"] == "TEXT_EVIDENCE_FOUND"
+
+
+def test_document_report_does_not_claim_absence_when_pages_need_ocr():
+    from app.services.vessel_document_extractor import build_extraction_report
+
+    report = build_extraction_report([(1, "LOA 100 m"), (2, "")])
+
+    assert report["sections"]["tanks_and_capacities"]["status"] == "OCR_REQUIRED"
+    assert 2 in report["pages_without_text"]
