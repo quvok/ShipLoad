@@ -35,6 +35,7 @@ def test_course_project_optimal_condition_reference_case():
         tcg_m=(displacement * tcg - lightship.mass_t * lightship.tcg_m) / deadweight_mass,
         vcg_m=(displacement * vcg - lightship.mass_t * lightship.vcg_m) / deadweight_mass,
         free_surface_moment_tm=fsm,
+        include_in_forward_strength=False,
     )
     table = [
         HydrostaticPoint(
