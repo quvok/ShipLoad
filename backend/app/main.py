@@ -1,20 +1,25 @@
 import hashlib
+import math
 import uuid
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import (
+    DocumentCandidateDecisionRecord,
     LoadingConditionRecord,
     LoadingItemRecord,
     SourceDocumentRecord,
+    VesselDataRevisionRecord,
     TankRecord,
     VesselRecord,
 )
@@ -222,6 +227,13 @@ def download_source_document(
     )
 
 
+class CandidateDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    reviewer_label: str = Field(min_length=2, max_length=80)
+    approved_value: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
 @app.get(
     "/api/v1/documents/{document_id}/candidates",
     tags=["documents"],
@@ -233,13 +245,181 @@ def get_document_candidates(
     record = session.get(SourceDocumentRecord, document_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Документ не найден")
+    decisions = {
+        item.candidate_index: item
+        for item in session.scalars(
+            select(DocumentCandidateDecisionRecord).where(
+                DocumentCandidateDecisionRecord.document_id == document_id
+            )
+        )
+    }
+    candidates = []
+    for index, candidate in enumerate(record.extracted_candidates):
+        decision = decisions.get(index)
+        candidates.append({
+            **candidate,
+            "candidate_index": index,
+            "review_status": decision.decision if decision else "PENDING",
+            "decision": (
+                {
+                    "reviewer_label": decision.reviewer_label,
+                    "decided_at": decision.decided_at.isoformat(),
+                    "comment": decision.comment,
+                    "approved_value": decision.approved_value,
+                    "revision_number": (
+                        session.scalar(
+                            select(VesselDataRevisionRecord.revision_number)
+                            .where(VesselDataRevisionRecord.vessel_id == record.vessel_id)
+                            .order_by(VesselDataRevisionRecord.revision_number.desc())
+                            .limit(1)
+                        ) if decision.decision == "APPROVE" else None
+                    ),
+                } if decision else None
+            ),
+        })
     return {
         "document_id": record.id,
         "filename": record.original_filename,
         "extraction_status": record.extraction_status,
-        "candidates": record.extracted_candidates,
-        "message": "Распознанные значения являются кандидатами и требуют сверки с оригиналом.",
+        "candidates": candidates,
+        "message": "Кандидаты не утверждаются автоматически. Решения сохраняются в журнале.",
     }
+
+
+@app.post(
+    "/api/v1/documents/{document_id}/candidates/{candidate_index}/decision",
+    status_code=status.HTTP_201_CREATED,
+    tags=["documents"],
+)
+def decide_document_candidate(
+    document_id: str,
+    candidate_index: int,
+    request: CandidateDecisionRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    document = session.get(SourceDocumentRecord, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if candidate_index < 0 or candidate_index >= len(document.extracted_candidates):
+        raise HTTPException(status_code=404, detail="Кандидат не найден")
+    existing = session.scalar(
+        select(DocumentCandidateDecisionRecord).where(
+            DocumentCandidateDecisionRecord.document_id == document_id,
+            DocumentCandidateDecisionRecord.candidate_index == candidate_index,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Решение по кандидату уже зафиксировано")
+    candidate = document.extracted_candidates[candidate_index]
+    field = candidate.get("field")
+    allowed_limits = {
+        "loa_m": 1000.0,
+        "lbp_m": 1000.0,
+        "moulded_breadth_m": 250.0,
+        "moulded_depth_m": 150.0,
+    }
+    if field not in allowed_limits or candidate.get("unit") != "m":
+        raise HTTPException(status_code=422, detail="Этот тип кандидата пока нельзя утвердить")
+    proposed_value = float(candidate.get("value", 0))
+    approved_value = request.approved_value if request.approved_value is not None else proposed_value
+    if request.decision == "APPROVE":
+        if not math.isfinite(approved_value) or not 0 < approved_value <= allowed_limits[field]:
+            raise HTTPException(status_code=422, detail="Проверенное значение вне допустимого диапазона")
+    elif request.approved_value is not None:
+        raise HTTPException(status_code=422, detail="Для отклонения значение указывать нельзя")
+
+    decision = DocumentCandidateDecisionRecord(
+        document_id=document_id,
+        candidate_index=candidate_index,
+        field=field,
+        proposed_value=proposed_value,
+        approved_value=approved_value if request.decision == "APPROVE" else None,
+        unit="m",
+        page=int(candidate["page"]),
+        matched_text=str(candidate["matched_text"]),
+        decision=request.decision,
+        reviewer_label=request.reviewer_label.strip(),
+        comment=request.comment.strip() if request.comment else None,
+    )
+    session.add(decision)
+
+    revision_number = None
+    if request.decision == "APPROVE":
+        latest = session.scalar(
+            select(VesselDataRevisionRecord)
+            .where(VesselDataRevisionRecord.vessel_id == document.vessel_id)
+            .order_by(VesselDataRevisionRecord.revision_number.desc())
+            .limit(1)
+        )
+        values = dict(latest.values) if latest else {}
+        sources = dict(latest.source_references) if latest else {}
+        values[field] = approved_value
+        sources[field] = {
+            "document_id": document.id,
+            "filename": document.original_filename,
+            "page": int(candidate["page"]),
+            "matched_text": str(candidate["matched_text"]),
+            "proposed_value": proposed_value,
+            "approved_value": approved_value,
+            "unit": "m",
+            "decision_id": decision.id,
+            "reviewer_label": decision.reviewer_label,
+            "decided_at": datetime.now(UTC).isoformat(),
+        }
+        revision_number = (latest.revision_number if latest else 0) + 1
+        session.add(VesselDataRevisionRecord(
+            vessel_id=document.vessel_id,
+            revision_number=revision_number,
+            values=values,
+            source_references=sources,
+            created_by=decision.reviewer_label,
+            change_summary=f"Подтверждено {field} из документа {document.original_filename}, стр. {candidate['page']}",
+        ))
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    return {
+        "decision": request.decision,
+        "candidate_index": candidate_index,
+        "reviewer_label": decision.reviewer_label,
+        "revision_number": revision_number,
+        "message": (
+            "Кандидат утверждён и включён в новую неизменяемую ревизию исходных данных."
+            if request.decision == "APPROVE"
+            else "Кандидат отклонён. Исходные данные судна не изменены."
+        ),
+    }
+
+
+@app.get(
+    "/api/v1/vessels/{vessel_id}/data-revisions",
+    tags=["vessels"],
+)
+def list_vessel_data_revisions(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> list[dict[str, object]]:
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    revisions = session.scalars(
+        select(VesselDataRevisionRecord)
+        .where(VesselDataRevisionRecord.vessel_id == vessel_id)
+        .order_by(VesselDataRevisionRecord.revision_number)
+    ).all()
+    return [
+        {
+            "id": item.id,
+            "revision_number": item.revision_number,
+            "values": item.values,
+            "source_references": item.source_references,
+            "created_by": item.created_by,
+            "change_summary": item.change_summary,
+            "created_at": item.created_at.isoformat(),
+        }
+        for item in revisions
+    ]
 
 
 @app.post(
