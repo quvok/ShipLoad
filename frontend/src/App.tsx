@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 type NavKey = "overview" | "vessels" | "documents" | "loading" | "reports";
 type VesselType = "general_cargo" | "container" | "bulk_carrier" | "tanker" | "multipurpose" | "other";
@@ -42,7 +42,7 @@ function App() {
 
   useEffect(() => { void loadVessels(); }, [loadVessels]);
 
-  async function createVessel(event: React.FormEvent<HTMLFormElement>) {
+  async function createVessel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
     const form = new FormData(event.currentTarget);
     const payload = {
@@ -125,7 +125,7 @@ function App() {
 
 function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loading, error, success, onRefresh }: {
   vessels: Vessel[]; apiState: "checking" | "online" | "offline"; showForm: boolean;
-  setShowForm: (value: boolean) => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  setShowForm: (value: boolean) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   loading: boolean; error: string; success: string; onRefresh: () => void;
 }) {
   return <><div className="page-heading"><div><div className="eyebrow">РЕЕСТР ФЛОТА</div><h1>Суда</h1><p>Паспорта судов и исходные системы координат. Все значения вводятся по судовой документации.</p></div><button className="primary-button" onClick={() => setShowForm(!showForm)}>{showForm ? "Закрыть форму" : "＋ Добавить судно"}</button></div>
