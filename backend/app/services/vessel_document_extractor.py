@@ -101,6 +101,13 @@ _SECTION_LABELS = {
 }
 
 
+def _term_matches_line(term: str, lowered_line: str) -> bool:
+    normalized = term.casefold()
+    if len(normalized) <= 3 and normalized.isalpha():
+        return re.search(r"\\b" + re.escape(normalized) + r"\\b", lowered_line) is not None
+    return normalized in lowered_line
+
+
 def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
     """Build a document-wide evidence inventory without inferring missing values.
 
@@ -119,7 +126,7 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
             lines = [line.strip() for line in page_text.splitlines() if line.strip()]
             for line in lines:
                 lowered = line.casefold()
-                matched = [term for term in terms if term.casefold() in lowered]
+                matched = [term for term in terms if _term_matches_line(term, lowered)]
                 if not matched:
                     continue
                 identity = (page_number, line[:300])
