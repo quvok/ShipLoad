@@ -344,6 +344,17 @@ class CandidateDecisionRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=2000)
 
 
+class CandidateBatchApprovalItem(BaseModel):
+    candidate_index: int = Field(ge=0)
+    approved_value: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class CandidateBatchApprovalRequest(BaseModel):
+    reviewer_label: str = Field(min_length=2, max_length=80)
+    items: list[CandidateBatchApprovalItem] = Field(min_length=1, max_length=100)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
 @app.get(
     "/api/v1/documents/{document_id}/candidates",
     tags=["documents"],
@@ -505,6 +516,134 @@ def decide_document_candidate(
             if request.decision == "APPROVE"
             else "Кандидат отклонён. Исходные данные судна не изменены."
         ),
+    }
+
+
+@app.post(
+    "/api/v1/documents/{document_id}/candidates/approve-batch",
+    status_code=status.HTTP_201_CREATED,
+    tags=["documents"],
+)
+def approve_document_candidates_batch(
+    document_id: str,
+    request: CandidateBatchApprovalRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Approve several reviewed values atomically in one immutable vessel revision."""
+    document = session.get(SourceDocumentRecord, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    reviewer_label = request.reviewer_label.strip()
+    if len(reviewer_label) < 2:
+        raise HTTPException(status_code=422, detail="Укажите имя или должность проверяющего")
+
+    indices = [item.candidate_index for item in request.items]
+    if len(indices) != len(set(indices)):
+        raise HTTPException(status_code=422, detail="В пакетном подтверждении есть повторяющиеся кандидаты")
+
+    existing_indices = set(session.scalars(
+        select(DocumentCandidateDecisionRecord.candidate_index).where(
+            DocumentCandidateDecisionRecord.document_id == document_id,
+            DocumentCandidateDecisionRecord.candidate_index.in_(indices),
+        )
+    ))
+    if existing_indices:
+        raise HTTPException(status_code=409, detail="Часть кандидатов уже имеет зафиксированное решение")
+
+    allowed_limits = {
+        "loa_m": 1000.0,
+        "lbp_m": 1000.0,
+        "moulded_breadth_m": 250.0,
+        "moulded_depth_m": 150.0,
+    }
+    latest = session.scalar(
+        select(VesselDataRevisionRecord)
+        .where(VesselDataRevisionRecord.vessel_id == document.vessel_id)
+        .order_by(VesselDataRevisionRecord.revision_number.desc())
+        .limit(1)
+    )
+    values = dict(latest.values) if latest else {}
+    sources = dict(latest.source_references) if latest else {}
+    decisions: list[DocumentCandidateDecisionRecord] = []
+    summaries: list[dict[str, object]] = []
+
+    for item in request.items:
+        if item.candidate_index >= len(document.extracted_candidates):
+            raise HTTPException(status_code=404, detail=f"Кандидат {item.candidate_index} не найден")
+        candidate = document.extracted_candidates[item.candidate_index]
+        field = candidate.get("field")
+        if field not in allowed_limits or candidate.get("unit") != "m":
+            raise HTTPException(status_code=422, detail="Один из кандидатов имеет неподдерживаемый тип или единицу")
+        proposed_value = float(candidate.get("value", 0))
+        approved_value = item.approved_value if item.approved_value is not None else proposed_value
+        if not math.isfinite(approved_value) or not 0 < approved_value <= allowed_limits[field]:
+            raise HTTPException(status_code=422, detail=f"Проверенное значение {field} вне допустимого диапазона")
+        values[field] = approved_value
+        decision_id = str(uuid.uuid4())
+        decision = DocumentCandidateDecisionRecord(
+            id=decision_id,
+            document_id=document.id,
+            candidate_index=item.candidate_index,
+            field=field,
+            proposed_value=proposed_value,
+            approved_value=approved_value,
+            unit="m",
+            page=int(candidate["page"]),
+            matched_text=str(candidate["matched_text"]),
+            decision="APPROVE",
+            reviewer_label=reviewer_label,
+            comment=request.comment.strip() if request.comment else None,
+        )
+        decisions.append(decision)
+        sources[field] = {
+            "document_id": document.id,
+            "filename": document.original_filename,
+            "page": int(candidate["page"]),
+            "matched_text": str(candidate["matched_text"]),
+            "evidence": candidate.get("evidence", [
+                {"page": int(candidate["page"]), "matched_text": str(candidate["matched_text"])}
+            ]),
+            "proposed_value": proposed_value,
+            "approved_value": approved_value,
+            "unit": "m",
+            "decision_id": decision_id,
+            "reviewer_label": reviewer_label,
+            "decided_at": datetime.now(UTC).isoformat(),
+        }
+        summaries.append({
+            "candidate_index": item.candidate_index,
+            "field": field,
+            "approved_value": approved_value,
+        })
+
+    if values.get("lbp_m") is not None and values.get("loa_m") is not None and values["lbp_m"] > values["loa_m"]:
+        raise HTTPException(status_code=422, detail="LBP не может превышать LOA в одной ревизии")
+    if values.get("moulded_breadth_m") is not None and values.get("loa_m") is not None and values["moulded_breadth_m"] > values["loa_m"]:
+        raise HTTPException(status_code=422, detail="Ширина B не может превышать LOA в одной ревизии")
+
+    revision_number = (latest.revision_number if latest else 0) + 1
+    for decision in decisions:
+        decision.revision_number = revision_number
+        session.add(decision)
+    session.add(VesselDataRevisionRecord(
+        vessel_id=document.vessel_id,
+        revision_number=revision_number,
+        values=values,
+        source_references=sources,
+        created_by=reviewer_label,
+        change_summary=f"Пакетно подтверждено параметров: {len(decisions)} из {document.original_filename}",
+    ))
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    return {
+        "revision_number": revision_number,
+        "approved_count": len(decisions),
+        "items": summaries,
+        "message": f"Подтверждено параметров: {len(decisions)}. Создана одна ревизия исходных данных.",
     }
 
 
