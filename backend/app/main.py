@@ -62,7 +62,10 @@ def create_vessel(
         lbp_m=vessel.lbp_m,
         moulded_breadth_m=vessel.moulded_breadth_m,
         moulded_depth_m=vessel.moulded_depth_m,
-        coordinate_convention=vessel.coordinate_convention.model_dump(mode="json"),
+        coordinate_convention=(
+            vessel.coordinate_convention.model_dump(mode="json")
+            if vessel.coordinate_convention is not None else None
+        ),
         data_status="DRAFT",
     )
     session.add(record)
