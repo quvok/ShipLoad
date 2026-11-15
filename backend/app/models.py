@@ -162,6 +162,7 @@ class DocumentCandidateDecisionRecord(Base):
     page: Mapped[int] = mapped_column(Integer, nullable=False)
     matched_text: Mapped[str] = mapped_column(Text, nullable=False)
     decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    revision_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewer_label: Mapped[str] = mapped_column(String(80), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime] = mapped_column(
