@@ -90,3 +90,18 @@ def test_table_page_hint_accepts_dotted_lcf_lcb_labels():
 
     assert _PAGE_HINTS.search("L.C.F FROM AP (m)")
     assert _PAGE_HINTS.search("L.C.B FROM AP (m)")
+
+def test_identical_principal_particulars_are_deduplicated_with_all_source_pages():
+    pages = [
+        (2, "Length Between Perpendiculars: 283.100 m; Breadth (Molded): 50.000 m"),
+        (8, "BREADTH 50.0 m"),
+        (139, "LBP = 283.10 m"),
+        (140, "LBP = 283.10 m"),
+    ]
+    result = extract_principal_particulars(pages)
+    by_field = {item["field"]: item for item in result}
+
+    assert len(result) == 2
+    assert by_field["lbp_m"]["value"] == 283.1
+    assert [source["page"] for source in by_field["lbp_m"]["evidence"]] == [2, 139, 140]
+    assert [source["page"] for source in by_field["moulded_breadth_m"]["evidence"]] == [2, 8]
