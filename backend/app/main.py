@@ -566,6 +566,7 @@ def approve_document_candidates_batch(
     sources = dict(latest.source_references) if latest else {}
     decisions: list[DocumentCandidateDecisionRecord] = []
     summaries: list[dict[str, object]] = []
+    approved_fields: set[str] = set()
 
     for item in request.items:
         if item.candidate_index >= len(document.extracted_candidates):
@@ -574,6 +575,12 @@ def approve_document_candidates_batch(
         field = candidate.get("field")
         if field not in allowed_limits or candidate.get("unit") != "m":
             raise HTTPException(status_code=422, detail="Один из кандидатов имеет неподдерживаемый тип или единицу")
+        if field in approved_fields:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Найдено несколько разных значений для {field}. Подтвердите только одно после сверки.",
+            )
+        approved_fields.add(str(field))
         proposed_value = float(candidate.get("value", 0))
         approved_value = item.approved_value if item.approved_value is not None else proposed_value
         if not math.isfinite(approved_value) or not 0 < approved_value <= allowed_limits[field]:
