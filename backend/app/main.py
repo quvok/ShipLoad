@@ -1,17 +1,20 @@
 import hashlib
-import re
 import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import File, Form, UploadFile
-
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import LoadingConditionRecord, LoadingItemRecord, SourceDocumentRecord, TankRecord, VesselRecord
+from app.models import (
+    LoadingConditionRecord,
+    LoadingItemRecord,
+    SourceDocumentRecord,
+    TankRecord,
+    VesselRecord,
+)
 from app.services.vessel_document_extractor import extract_principal_particulars
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
