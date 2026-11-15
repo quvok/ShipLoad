@@ -159,7 +159,7 @@ async def upload_vessel_document(
         if reader.is_encrypted:
             try:
                 decrypted = reader.decrypt("")
-            except Exception:
+            except (ValueError, TypeError, NotImplementedError):
                 decrypted = 0
             if not decrypted:
                 raise HTTPException(
