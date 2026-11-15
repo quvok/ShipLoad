@@ -44,7 +44,8 @@ function App() {
 
   async function createVessel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
-    const formElement = event.currentTarget;\n    const form = new FormData(formElement);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const payload = {
       name: String(form.get("name") ?? "").trim(),
       vessel_type: form.get("vessel_type"),
@@ -183,7 +184,8 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice(""); setBusy(true);
-    const formElement = event.currentTarget;\n    const form = new FormData(formElement);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const payload = {
       vessel_id: vesselId,
       name: String(form.get("condition_name") ?? "").trim(),
