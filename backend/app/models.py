@@ -92,3 +92,27 @@ class LoadingItemRecord(Base):
     tank_id: Mapped[str | None] = mapped_column(ForeignKey("tanks.id", ondelete="RESTRICT"), nullable=True)
     source_reference: Mapped[str] = mapped_column(String(500), nullable=False)
     condition: Mapped[LoadingConditionRecord] = relationship(back_populates="items")
+
+
+class SourceDocumentRecord(Base):
+    __tablename__ = "source_documents"
+    __table_args__ = (
+        UniqueConstraint("vessel_id", "sha256", name="uq_source_document_hash_per_vessel"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    vessel_id: Mapped[str] = mapped_column(
+        ForeignKey("vessels.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_filename: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    media_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(40), nullable=False, default="other")
+    extraction_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    extracted_candidates: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    vessel: Mapped[VesselRecord] = relationship()
