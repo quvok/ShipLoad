@@ -34,18 +34,59 @@ _KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
     ),
 }
+_SPECIAL_KIND_PATTERNS: dict[str, re.Pattern[str]] = {
+    "free_surface": re.compile(
+        r"(?:tank name|cargo tank|ballast tank).{0,100}(?:F\\.?\\s*S\\.?\\s*M)|"
+        r"(?:F\\.?\\s*S\\.?\\s*M).{0,100}(?:T-M|tank)",
+        re.IGNORECASE,
+    ),
+    "draft_corrections": re.compile(
+        r"draft correction values|aft mark\\s*[12].{0,80}mid mark.{0,80}fore mark",
+        re.IGNORECASE,
+    ),
+    "windage": re.compile(
+        r"lateral area.{0,100}heeling moment|wind pressure.{0,100}heeling moment",
+        re.IGNORECASE,
+    ),
+    "ice_loading": re.compile(
+        r"mass of ice|ice per square meter",
+        re.IGNORECASE,
+    ),
+    "inclining_experiment": re.compile(
+        r"inclining experiment|slope of tangent|pendulum reading",
+        re.IGNORECASE,
+    ),
+    "propeller_immersion": re.compile(
+        r"propeller immersion|\\bdAp\\s*=",
+        re.IGNORECASE,
+    ),
+    "trimming_table": re.compile(
+        r"trimming table|trim correction values",
+        re.IGNORECASE,
+    ),
+}
 _LABELS = {
     "hydrostatics": "Гидростатическая таблица",
     "tank_capacity": "Таблица танков / вместимостей",
     "stability": "Таблица остойчивости",
     "strength": "Таблица продольной прочности",
     "loading_condition": "Таблица загрузочного условия",
+    "free_surface": "Таблица моментов свободных поверхностей (FSM)",
+    "draft_corrections": "Таблица поправок осадки",
+    "windage": "Площадь парусности и ветровой момент",
+    "ice_loading": "Данные об обледенении",
+    "inclining_experiment": "Данные кренового опыта",
+    "propeller_immersion": "Расчёт погружения винта",
+    "trimming_table": "Таблица изменения осадки и дифферента",
     "other": "Таблица (тип не определён)",
 }
 
 
 def _classify_table(sample: str) -> str:
-    """Classify by distinctive table content; generic displacement is not hydrostatics."""
+    """Prefer distinctive operational subtypes over broad loading/stability labels."""
+    for kind, pattern in _SPECIAL_KIND_PATTERNS.items():
+        if pattern.search(sample):
+            return kind
     scores = {
         kind: sum(4 if index == 0 else 2 for index, pattern in enumerate(patterns) if pattern.search(sample))
         for kind, patterns in _KIND_PATTERNS.items()
