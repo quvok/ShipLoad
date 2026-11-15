@@ -15,7 +15,7 @@ _PAGE_HINTS = re.compile(
     re.IGNORECASE,
 )
 _KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"L\\.?\\s*C\\.?\\s*[BF]\\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.I)),
+    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.I)),
     ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.I)),
     ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.I)),
     ("strength", re.compile(r"shear force|bending moment|still water|strength", re.I)),
