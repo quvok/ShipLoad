@@ -164,7 +164,7 @@ type ExtractionReport = {
   limitations: string[];
   table_analysis?: {
     status: string; candidate_pages: number[]; pages_checked: number[];
-    pages_skipped_by_limit: number[]; tables_found: number;
+    pages_skipped_by_limit: number[]; pages_skipped_complex: number[]; tables_found: number;
     tables: { page: number; kind: string; label: string; row_count_preview: number;
       column_count_preview: number; rows: string[][]; note: string }[];
     page_errors: { page: number | null; error: string }[]; note: string;
@@ -326,7 +326,8 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
           <div className="report-section-heading"><strong>Структурное извлечение таблиц</strong><span className="draft-tag">{report.table_analysis.tables_found} таблиц</span></div>
           <p>{report.table_analysis.note}</p>
           <p className="form-hint">Проверены страницы: {report.table_analysis.pages_checked.length ? report.table_analysis.pages_checked.join(", ") : "нет"}.
-            {report.table_analysis.pages_skipped_by_limit.length > 0 ? ` Пропущены по лимиту: ${report.table_analysis.pages_skipped_by_limit.join(", ")}.` : ""}
+            {report.table_analysis.pages_skipped_by_limit.length > 0 ? ` Пропущены по лимиту страниц: ${report.table_analysis.pages_skipped_by_limit.join(", ")}.` : ""}
+            {report.table_analysis.pages_skipped_complex?.length > 0 ? ` Сложные векторные страницы пропущены ради ограничения нагрузки: ${report.table_analysis.pages_skipped_complex.join(", ")}.` : ""}
           </p>
           {report.table_analysis.tables.map((table, index) => <article className="report-section" key={`${table.page}-${index}`}>
             <div className="report-section-heading"><strong>{table.label}</strong><span className="draft-tag">Стр. {table.page}</span></div>
