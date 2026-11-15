@@ -237,3 +237,18 @@ def test_create_loading_condition_rejects_unknown_vessel():
 def test_get_missing_loading_condition_returns_404():
     response = client.get("/api/v1/loading-conditions/missing-condition")
     assert response.status_code == 404
+
+
+def test_create_document_first_vessel_draft_without_assumed_dimensions_or_axes():
+    response = client.post(
+        "/api/v1/vessels",
+        json={"name": "Черновик из документов", "vessel_type": "tanker"},
+    )
+    assert response.status_code == 201
+    vessel = response.json()
+    assert vessel["loa_m"] is None
+    assert vessel["lbp_m"] is None
+    assert vessel["moulded_breadth_m"] is None
+    assert vessel["moulded_depth_m"] is None
+    assert vessel["coordinate_convention"] is None
+    assert vessel["data_status"] == "DRAFT"
