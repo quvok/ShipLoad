@@ -145,6 +145,11 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
     empty_pages = [number for number, text in pages if not text.strip()]
     sections: dict[str, object] = {}
 
+    # A document-wide OCR warning is raised only when at least half of all
+    # pages have no extractable text. This is deliberately a coverage signal,
+    # not a claim that a particular missing section is located on a blank page.
+    ocr_coverage_gap = bool(pages) and len(empty_pages) / len(pages) >= 0.5
+
     for key, terms in _REPORT_SECTIONS.items():
         evidence: list[dict[str, object]] = []
         seen: set[tuple[int, str]] = set()
@@ -174,12 +179,18 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
 
         sections[key] = {
             "label": _SECTION_LABELS[key],
-            "status": "TEXT_EVIDENCE_FOUND" if evidence else "NOT_FOUND_IN_EXTRACTED_TEXT",
+            "status": (
+                "TEXT_EVIDENCE_FOUND" if evidence else
+                "OCR_REQUIRED" if ocr_coverage_gap else
+                "NOT_FOUND_IN_EXTRACTED_TEXT"
+            ),
             "evidence_count": len(evidence),
             "evidence": evidence,
             "note": (
                 "Найдены текстовые указатели. Они не являются утверждёнными параметрами."
                 if evidence else
+                "Значительная часть документа не имеет извлекаемого текстового слоя. Требуется OCR/визуальная проверка; это предупреждение относится ко всему документу и не указывает, на каких именно страницах расположен этот раздел."
+                if ocr_coverage_gap else
                 "Совпадения в текстовом слое не найдены. Это не доказывает отсутствие данных на схемах или изображениях."
             ),
         }
@@ -190,6 +201,12 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
         "page_count": len(pages),
         "pages_with_text": len(text_pages),
         "pages_without_text": empty_pages,
+        "ocr_coverage": {
+            "pages_without_text": len(empty_pages),
+            "total_pages": len(pages),
+            "document_wide_ocr_warning": ocr_coverage_gap,
+            "warning_threshold": 0.5,
+        },
         "pages": [
             {"page": number, "category": _page_category(text), "has_text": bool(text.strip())}
             for number, text in pages
