@@ -219,6 +219,8 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       const refreshed = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/loading-conditions`);
       if (refreshed.ok) setRecords(await refreshed.json() as LoadingSummary[]);
       formElement.reset();
+      setItemRows([0]);
+      setNextItemRow(1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось сохранить запись.");
     } finally { setBusy(false); }
