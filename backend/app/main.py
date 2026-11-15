@@ -88,7 +88,7 @@ def _condition_summary(record: LoadingConditionRecord) -> dict[str, object]:
 @app.post("/api/v1/loading-conditions", status_code=status.HTTP_201_CREATED, tags=["loading"])
 def create_loading_condition(
     condition: LoadingConditionCreate,
-    session: Session = Depends(get_session),
+    session: Annotated[Session, Depends(get_session)],
 ) -> dict[str, object]:
     """Persist declared inputs only. This endpoint performs no naval calculations."""
     vessel = session.get(VesselRecord, condition.vessel_id)
@@ -127,7 +127,7 @@ def create_loading_condition(
 @app.get("/api/v1/vessels/{vessel_id}/loading-conditions", tags=["loading"])
 def list_loading_conditions(
     vessel_id: str,
-    session: Session = Depends(get_session),
+    session: Annotated[Session, Depends(get_session)],
 ) -> list[dict[str, object]]:
     if session.get(VesselRecord, vessel_id) is None:
         raise HTTPException(status_code=404, detail="Судно не найдено")
@@ -142,7 +142,7 @@ def list_loading_conditions(
 @app.get("/api/v1/loading-conditions/{condition_id}", tags=["loading"])
 def get_loading_condition(
     condition_id: str,
-    session: Session = Depends(get_session),
+    session: Annotated[Session, Depends(get_session)],
 ) -> dict[str, object]:
     record = session.get(LoadingConditionRecord, condition_id)
     if record is None:
