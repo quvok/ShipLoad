@@ -53,3 +53,40 @@ def test_document_report_does_not_claim_absence_when_pages_need_ocr():
 
     assert report["sections"]["tanks_and_capacities"]["status"] == "OCR_REQUIRED"
     assert 2 in report["pages_without_text"]
+
+
+def test_extracts_both_molded_spellings_from_principal_particulars():
+    pages = [(2, "Breadth (Molded) : 50.000 m\\nDepth (Molded) : 26.500 m")]
+    result = extract_principal_particulars(pages)
+    values = {item["field"]: item["value"] for item in result}
+    assert values["moulded_breadth_m"] == 50.0
+    assert values["moulded_depth_m"] == 26.5
+
+
+def test_document_report_does_not_treat_class_notation_km_as_hydrostatics():
+    from app.services.vessel_document_extractor import build_extraction_report
+
+    pages = [
+        (2, "KM ★, Arc7 (Arc7 at d<=12.0m), Gas carrier type 2G"),
+        (73, "L.C.F FROM AP (m): 146.01 145.99 145.97"),
+        (8, "NO.2 CARGO TANK NO.1 CARGO TANK"),
+        (9, "Tank"),
+        (171, ""),
+    ]
+    report = build_extraction_report(pages)
+    hydro = report["sections"]["hydrostatics"]["evidence"]
+    tanks = report["sections"]["tanks_and_capacities"]["evidence"]
+
+    assert not any("KM" in item["matched_terms"] for item in hydro)
+    assert any(item["page"] == 73 for item in hydro)
+    assert any(item["page"] == 8 for item in tanks)
+    assert not any(item["page"] == 9 for item in tanks)
+    assert report["pages_without_text"] == [171]
+    assert all(section["status"] != "OCR_REQUIRED" for section in report["sections"].values())
+
+
+def test_table_page_hint_accepts_dotted_lcf_lcb_labels():
+    from app.services.pdf_table_extractor import _PAGE_HINTS
+
+    assert _PAGE_HINTS.search("L.C.F FROM AP (m)")
+    assert _PAGE_HINTS.search("L.C.B FROM AP (m)")
