@@ -22,9 +22,16 @@ def valid_vessel() -> dict:
     }
 
 
-def test_vessel_schema_requires_explicit_reference_convention() -> None:
+def test_vessel_schema_allows_missing_reference_convention_in_document_first_draft() -> None:
     data = valid_vessel()
     del data["coordinate_convention"]
+    vessel = VesselCreate.model_validate(data)
+    assert vessel.coordinate_convention is None
+
+
+def test_vessel_schema_rejects_invalid_reference_convention_when_supplied() -> None:
+    data = valid_vessel()
+    data["coordinate_convention"] = {"origin_description": "AP"}
     with pytest.raises(ValidationError):
         VesselCreate.model_validate(data)
 
