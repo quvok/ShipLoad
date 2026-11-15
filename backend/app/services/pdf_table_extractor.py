@@ -25,7 +25,7 @@ _KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"GZ curve|righting lever|heel angle|stability criteria|free surface moment|cross curve", re.IGNORECASE),
     ),
     "hydrostatics": (
-        re.compile(r"L\\.?\\s*C\\.?\\s*[BF]\\.?|\\bLCB\\b|\\bLCF\\b|\\bTPC\\b|\\bMCT\\b|hydrostatic|waterplane|\\bKM\\b|\\bKB\\b", re.IGNORECASE),
+        re.compile(r"L\.?\s*C\.?\s*[BF]\.?|\bLCB\b|\bLCF\b|\bTPC\b|\bMCT\b|hydrostatic|waterplane|\bKM\b|\bKB\b", re.IGNORECASE),
     ),
     "loading_condition": (
         re.compile(r"loading condition|deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
