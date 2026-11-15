@@ -43,16 +43,30 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
 def extract_principal_particulars(pages: list[tuple[int, str]]) -> list[dict[str, object]]:
     """Return candidates with page and matched source text; never approve them."""
     candidates: list[dict[str, object]] = []
+    candidate_index: dict[tuple[str, float, str], int] = {}
     for page_number, text in pages:
         for field, pattern in _PATTERNS.items():
             for match in pattern.finditer(text):
                 value = float(match.group(1).replace(",", "."))
                 if not 0 < value < 2000:
                     continue
-                candidates.append(asdict(ExtractedCandidate(
+                matched_text = match.group(0).strip()
+                key = (field, value, "m")
+                evidence = {"page": page_number, "matched_text": matched_text}
+                existing_index = candidate_index.get(key)
+                if existing_index is not None:
+                    existing = candidates[existing_index]
+                    sources = existing["evidence"]
+                    if evidence not in sources:
+                        sources.append(evidence)
+                    continue
+                candidate = asdict(ExtractedCandidate(
                     field=field, value=value, unit="m", page=page_number,
-                    matched_text=match.group(0).strip(),
-                )))
+                    matched_text=matched_text,
+                ))
+                candidate["evidence"] = [evidence]
+                candidate_index[key] = len(candidates)
+                candidates.append(candidate)
     return candidates
 
 
