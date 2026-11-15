@@ -25,6 +25,7 @@ class WeightItem:
     tcg_m: float
     vcg_m: float
     free_surface_moment_tm: float = 0.0
+    include_in_forward_strength: bool = True
 
 
 @dataclass(frozen=True)
@@ -152,7 +153,7 @@ def calculate_loading_condition(
         moment_y_tm += item.mass_t * item.tcg_m
         moment_z_tm += item.mass_t * item.vcg_m
         free_surface_moment_tm += item.free_surface_moment_tm
-        if item.lcg_m > lbp_m / 2:
+        if item.include_in_forward_strength and item.lcg_m > lbp_m / 2:
             forward_moment_tm += item.mass_t * (item.lcg_m - lbp_m / 2)
 
     if displacement_t <= 0:
