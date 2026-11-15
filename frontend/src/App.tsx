@@ -89,7 +89,7 @@ function App() {
       <main className="main">
         <header className="topbar"><div><span className="breadcrumb">Рабочая область</span><span className="slash">/</span><strong>{navigation.find((item) => item.key === active)?.label}</strong></div><div className="topbar-right"><span className="env-tag">РАЗРАБОТКА</span><a className="help-button" href="https://github.com/quvok/ShipLoad" target="_blank" rel="noreferrer">Репозиторий ↗</a></div></header>
         <section className="content">
-          {active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
+          {active === "documents" ? (<DocumentsPage vessels={vessels} apiState={apiState} />) : active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
             <TanksPage vessels={vessels} apiState={apiState} />
           ) : active === "vessels" ? (
             <VesselsPage vessels={vessels} apiState={apiState} showForm={showForm} setShowForm={setShowForm}
@@ -162,6 +162,106 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
       {vessels.length === 0 ? <div className="empty-state"><div className="empty-icon">▤</div><strong>Список судов пуст</strong><p>Создайте первый профиль. Запись будет сохранена в локальной SQLite-базе backend.</p></div> :
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Тип</th><th>LOA × B, м</th><th>LBP, м</th><th>Статус данных</th></tr></thead><tbody>{vessels.map((vessel) => <tr key={vessel.id}><td><strong>{vessel.name}</strong><small>{vessel.id}</small></td><td>{vesselTypes.find((type) => type.value === vessel.vessel_type)?.label ?? vessel.vessel_type}</td><td>{vessel.loa_m} × {vessel.moulded_breadth_m}</td><td>{vessel.lbp_m}</td><td><span className="draft-tag">{vessel.data_status}</span></td></tr>)}</tbody></table></div>}
     </section>
+  </>;
+}
+
+
+type SourceDocument = {
+  id: string; vessel_id: string; original_filename: string; media_type: string;
+  size_bytes: number; sha256: string; document_type: string;
+  extraction_status: string; candidate_count: number; uploaded_at: string;
+};
+type ExtractedCandidate = {
+  field: string; value: number; unit: string; page: number; matched_text: string; status: string;
+};
+const documentTypes = [
+  ["ship_particulars", "Основные характеристики судна"],
+  ["stability_booklet", "Информация об остойчивости"],
+  ["general_arrangement", "Общее расположение"],
+  ["lines_plan", "Теоретический чертёж"],
+  ["other", "Другой документ"],
+];
+const candidateLabels: Record<string, string> = {
+  loa_m: "Длина наибольшая (LOA)",
+  lbp_m: "Длина между перпендикулярами (LBP)",
+  moulded_breadth_m: "Теоретическая ширина (B)",
+  moulded_depth_m: "Теоретическая высота борта (D)",
+};
+function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checking" | "online" | "offline" }) {
+  const [vesselId, setVesselId] = useState("");
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [candidates, setCandidates] = useState<ExtractedCandidate[]>([]);
+  const [selectedDocument, setSelectedDocument] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const loadDocuments = useCallback(async (id: string) => {
+    if (!id) { setDocuments([]); setCandidates([]); setSelectedDocument(""); return; }
+    const response = await fetch(`${API}/vessels/${encodeURIComponent(id)}/documents`);
+    if (!response.ok) throw new Error("Не удалось получить список документов.");
+    setDocuments(await response.json() as SourceDocument[]);
+  }, []);
+  useEffect(() => {
+    setError("");
+    void loadDocuments(vesselId).catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка загрузки документов."));
+  }, [vesselId, loadDocuments]);
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!vesselId) return;
+    setBusy(true); setError(""); setMessage("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/documents`, { method: "POST", body: form });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось загрузить документ.");
+      }
+      const created = await response.json() as SourceDocument;
+      await loadDocuments(vesselId);
+      setSelectedDocument(created.id);
+      setMessage("Оригинал сохранён. Извлечённые значения доступны для сверки; автоматически они не утверждаются.");
+      (event.currentTarget as HTMLFormElement).reset();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Ошибка загрузки документа.");
+    } finally { setBusy(false); }
+  }
+  useEffect(() => {
+    if (!selectedDocument) { setCandidates([]); return; }
+    void fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/candidates`)
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось получить результаты извлечения.");
+        return await response.json() as { candidates: ExtractedCandidate[] };
+      })
+      .then(data => setCandidates(data.candidates))
+      .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка получения кандидатов."));
+  }, [selectedDocument]);
+  const selected = documents.find(doc => doc.id === selectedDocument);
+  return <>
+    <div className="page-heading"><div><div className="eyebrow">ИСТОЧНИКИ ДАННЫХ СУДНА</div><h1>Документы</h1><p>Загрузите оригиналы PDF. Система извлечёт только кандидаты значений и сохранит ссылки на страницы источника.</p></div></div>
+    <div className="notice"><span className="notice-icon">!</span><div><strong>Распознавание не означает подтверждение</strong><p>Файлы хранятся в локальной папке backend вне публичной директории. Кандидаты необходимо сверить с оригиналом. Сканированные документы пока требуют отдельного OCR-модуля.</p></div></div>
+    {apiState !== "online" && <div className="inline-alert error">Для работы с документами необходимо подключение к локальному API.</div>}
+    {error && <div className="inline-alert error">{error}</div>}{message && <div className="inline-alert success">{message}</div>}
+    <section className="panel vessel-form-panel">
+      <div className="panel-heading"><div><div className="eyebrow">ЗАГРУЗКА ИСТОЧНИКА</div><h2>Добавить судовой документ</h2></div></div>
+      <form onSubmit={upload}>
+        <div className="form-grid">
+          <label>Судно<select value={vesselId} onChange={event => setVesselId(event.target.value)} required><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+          <label>Тип документа<select name="document_type" defaultValue="other">{documentTypes.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Файл PDF<input name="file" type="file" accept="application/pdf,.pdf" required /></label>
+        </div>
+        <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Загрузка…" : "Загрузить и извлечь данные"}</button></div>
+      </form>
+    </section>
+    <section className="panel vessel-list">
+      <div className="panel-heading"><div><div className="eyebrow">АРХИВ ОРИГИНАЛОВ</div><h2>Загруженные документы</h2></div><button className="secondary-button" onClick={() => void loadDocuments(vesselId)} disabled={!vesselId}>Обновить</button></div>
+      {!vesselId ? <div className="empty-state">Сначала выберите судно.</div> : documents.length === 0 ? <div className="empty-state">Для выбранного судна документы ещё не загружены.</div> :
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Файл</th><th>Тип</th><th>Объём</th><th>Извлечение</th><th>Кандидаты</th></tr></thead><tbody>{documents.map(doc => <tr key={doc.id} onClick={() => setSelectedDocument(doc.id)} className={selectedDocument === doc.id ? "selected-row" : ""}><td><strong>{doc.original_filename}</strong><small>SHA-256: {doc.sha256.slice(0,16)}…</small></td><td>{documentTypes.find(([value]) => value === doc.document_type)?.[1] ?? doc.document_type}</td><td>{(doc.size_bytes / 1024).toFixed(1)} КБ</td><td>{doc.extraction_status}</td><td>{doc.candidate_count}</td></tr>)}</tbody></table></div>}
+    </section>
+    {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
+      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> :
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Найденное значение</th><th>Страница</th><th>Фрагмент источника</th><th>Статус</th></tr></thead><tbody>{candidates.map((item,index) => <tr key={index}><td>{candidateLabels[item.field] ?? item.field}</td><td><strong>{item.value} {item.unit}</strong></td><td>{item.page}</td><td>{item.matched_text}</td><td>{item.status}</td></tr>)}</tbody></table></div>}
+      <p className="form-hint">Сейчас значения только отображаются для сверки. Они не переносятся в профиль и не используются в расчётах.</p>
+    </section>}
   </>;
 }
 
