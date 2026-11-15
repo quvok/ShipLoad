@@ -69,8 +69,11 @@ class LoadingCalculationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     vessel_data_revision: str = Field(min_length=1, max_length=80)
     coordinate_convention: str = Field(min_length=10, max_length=500)
+    coordinate_source_reference: Source
     lbp_m: Positive
+    lbp_source_reference: Source
     seawater_density_t_m3: Annotated[float, Field(gt=0.5, le=1.5, allow_inf_nan=False)]
+    seawater_density_source_reference: Source
     lightship: CalculationLightship
     items: list[CalculationWeight] = Field(min_length=1, max_length=2000)
     hydrostatic_table: list[CalculationHydrostaticRow] = Field(min_length=2, max_length=2000)

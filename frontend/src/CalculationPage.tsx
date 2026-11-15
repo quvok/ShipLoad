@@ -29,7 +29,9 @@ type CalculationResult = {
 type RunDetails = {
   id: string; name: string; calculation_result: CalculationResult;
   calculation_input?: {
-    coordinate_convention: string; lightship: { source_reference: string; strength_source_reference?: string | null };
+    coordinate_convention: string; coordinate_source_reference: string; lbp_source_reference: string;
+    seawater_density_source_reference: string;
+    lightship: { source_reference: string; strength_source_reference?: string | null };
     items: { name: string; source_reference: string }[];
     hydrostatic_table: { source_reference: string }[];
     kn_curve?: { source_reference: string }[];
@@ -53,6 +55,9 @@ function courseExample() {
     revision: "КП 2026 / Информация об остойчивости DA101Z035",
     lbp: "283.10", density: "1.018",
     coordinate: "Начало в AP на основной плоскости; X положительный в нос, Y на левый борт, Z вверх.",
+    lbpSource: "КП KP_TUS_Gr1_P18_3, строка «Длина между перпендикулярами»",
+    densitySource: "КП KP_TUS_Gr1_P18_3, строка «Плотность забортной воды»",
+    coordinateSource: "КП KP_TUS_Gr1_P18_3, текст о нуле координат и знаке ординаты Y; направления осей сверить",
     lightship: { mass_t: "47087.2", lcg_m: "119.245", tcg_m: "-0.106", vcg_m: "16.538", source_reference: "КП KP_TUS_Gr1_P18_3, таблица 1.3, стр. 6", forward_strength_moment_tm: "", strength_source_reference: "" },
     items: [
       { name: "Груз", mass_t: "84190.0", lcg_m: "154.03", tcg_m: "0.00", vcg_m: "16.77", free_surface_moment_tm: "103989.5", source_reference: course },
@@ -99,16 +104,77 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
   const [revision, setRevision] = useState("");
   const [coordinate, setCoordinate] = useState("");
   const [lbp, setLbp] = useState("");
+  const [lbpSource, setLbpSource] = useState("");
   const [density, setDensity] = useState("1.025");
+  const [densitySource, setDensitySource] = useState("");
+  const [coordinateSource, setCoordinateSource] = useState("");
   const [lightship, setLightship] = useState<LightshipForm>(blankLightship);
   const [items, setItems] = useState<WeightForm[]>([blankWeight()]);
   const [hydro, setHydro] = useState<HydroForm[]>([blankHydro(), blankHydro()]);
   const [knCurve, setKnCurve] = useState<KnForm[]>([]);
   const [history, setHistory] = useState<RunSummary[]>([]);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMessages, setImportMessages] = useState<string[]>([]);
+  const [needsSourceReview, setNeedsSourceReview] = useState(false);
+  const [sourceReviewConfirmed, setSourceReviewConfirmed] = useState(false);
   const [result, setResult] = useState<RunDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  async function importDocuments() {
+    if (!vesselId || !importFiles.length) return;
+    setImportBusy(true); setError(""); setNotice(""); setImportMessages([]);
+    const form = new FormData();
+    importFiles.forEach(file => form.append("files", file));
+    try {
+      const response = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/calculation-import`, { method: "POST", body: form });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(responseError(body, `Не удалось извлечь данные (HTTP ${response.status}).`));
+      const draft = body.draft as {
+        name: string; vessel_data_revision: string; lbp_m: number | null; seawater_density_t_m3: number | null;
+        lbp_source_reference: string; seawater_density_source_reference: string;
+        coordinate_convention: string | null; coordinate_source_reference: string;
+        lightship: { mass_t?: number; lcg_m?: number; tcg_m?: number; vcg_m?: number; source_reference?: string; forward_strength_moment_tm?: number; strength_source_reference?: string };
+        items: { name: string; mass_t: number; lcg_m: number; tcg_m: number; vcg_m: number; free_surface_moment_tm: number; source_reference: string }[];
+        hydrostatic_table: { displacement_volume_m3: number; draft_extreme_m: number; lcf_from_ap_m: number; lcb_from_ap_m: number; transverse_metacentre_z_m: number; mct_t_m_per_cm: number; source_reference: string }[];
+        kn_curve: { heel_angle_deg: number; kn_m: number; source_reference: string }[];
+      };
+      const numericText = (value: number | string | undefined | null) => value == null ? "" : String(value);
+      setName(draft.name ?? "Черновик из документов"); setRevision(draft.vessel_data_revision ?? "");
+      setLbp(numericText(draft.lbp_m)); setDensity(numericText(draft.seawater_density_t_m3) || density);
+      setLbpSource(draft.lbp_source_reference ?? ""); setDensitySource(draft.seawater_density_source_reference ?? "");
+      setCoordinate(draft.coordinate_convention ?? ""); setCoordinateSource(draft.coordinate_source_reference ?? "");
+      const importedLightship = draft.lightship ?? {};
+      setLightship({
+        mass_t: numericText(importedLightship.mass_t), lcg_m: numericText(importedLightship.lcg_m),
+        tcg_m: numericText(importedLightship.tcg_m), vcg_m: numericText(importedLightship.vcg_m),
+        source_reference: String(importedLightship.source_reference ?? ""),
+        forward_strength_moment_tm: numericText(importedLightship.forward_strength_moment_tm as number | undefined),
+        strength_source_reference: String(importedLightship.strength_source_reference ?? ""),
+      });
+      setItems(draft.items?.length ? draft.items.map(item => ({
+        ...item, mass_t: numericText(item.mass_t), lcg_m: numericText(item.lcg_m), tcg_m: numericText(item.tcg_m),
+        vcg_m: numericText(item.vcg_m), free_surface_moment_tm: numericText(item.free_surface_moment_tm),
+      })) : [blankWeight()]);
+      setHydro(draft.hydrostatic_table?.length ? draft.hydrostatic_table.map(row => ({
+        ...row, displacement_volume_m3: numericText(row.displacement_volume_m3),
+        draft_extreme_m: numericText(row.draft_extreme_m), lcf_from_ap_m: numericText(row.lcf_from_ap_m),
+        lcb_from_ap_m: numericText(row.lcb_from_ap_m), transverse_metacentre_z_m: numericText(row.transverse_metacentre_z_m),
+        mct_t_m_per_cm: numericText(row.mct_t_m_per_cm),
+      })) : [blankHydro(), blankHydro()]);
+      setKnCurve(draft.kn_curve?.length ? draft.kn_curve.map(point => ({
+        heel_angle_deg: numericText(point.heel_angle_deg), kn_m: numericText(point.kn_m), source_reference: point.source_reference,
+      })) : []);
+      setResult(null);
+      setNeedsSourceReview(true); setSourceReviewConfirmed(false);
+      setImportMessages([...(body.missing_fields ?? []).map((field: string) => `Не найдено: ${field}`), ...(body.warnings ?? [])]);
+      setNotice(`Загружено в архив и извлечено документов: ${body.documents?.length ?? importFiles.length}. Данные подставлены в форму как непроверенный черновик.`);
+      setImportFiles([]);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось прочитать документы."); }
+    finally { setImportBusy(false); }
+  }
 
   useEffect(() => {
     if (!vesselId) { setHistory([]); return; }
@@ -122,8 +188,11 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
 
   function loadCourseExample() {
     const sample = courseExample();
+    setImportMessages([]);
     setName(sample.name); setRevision(sample.revision); setLbp(sample.lbp); setDensity(sample.density);
-    setCoordinate(sample.coordinate); setLightship(sample.lightship); setItems(sample.items); setHydro(sample.hydro); setKnCurve(sample.kn);
+    setCoordinate(sample.coordinate); setLbpSource(sample.lbpSource); setDensitySource(sample.densitySource); setCoordinateSource(sample.coordinateSource);
+    setLightship(sample.lightship); setItems(sample.items); setHydro(sample.hydro); setKnCurve(sample.kn);
+    setNeedsSourceReview(true); setSourceReviewConfirmed(false);
     setResult(null); setError(""); setNotice("Загружены агрегированные значения из учебного примера. Перед запуском проверьте ссылки на первоисточники.");
   }
 
@@ -131,7 +200,8 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
     event.preventDefault(); setBusy(true); setError(""); setNotice("");
     const payload = {
       vessel_id: vesselId, name, vessel_data_revision: revision, coordinate_convention: coordinate,
-      lbp_m: n(lbp), seawater_density_t_m3: n(density),
+      coordinate_source_reference: coordinateSource, lbp_m: n(lbp), lbp_source_reference: lbpSource,
+      seawater_density_t_m3: n(density), seawater_density_source_reference: densitySource,
       lightship: {
         mass_t: n(lightship.mass_t), lcg_m: n(lightship.lcg_m), tcg_m: n(lightship.tcg_m), vcg_m: n(lightship.vcg_m),
         source_reference: lightship.source_reference,
@@ -186,6 +256,15 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
     <div className="notice"><span className="notice-icon">!</span><div><strong>Результат предварительный — ESTIMATE_ONLY</strong><p>Расчёт не является одобренным loadicator. Для эксплуатации необходимы независимая проверка методики, исходных таблиц, критериев класса и результата.</p></div></div>
     {apiState !== "online" && <div className="inline-alert error">Нет подключения к локальному API.</div>}
     {error && <div className="inline-alert error">{error}</div>}{notice && <div className="inline-alert success">{notice}</div>}
+    {importMessages.length > 0 && <div className="inline-alert warning"><strong>Проверьте извлечение:</strong><ul>{importMessages.map((message, index) => <li key={index}>{message}</li>)}</ul></div>}
+    <section className="panel vessel-form-panel">
+      <div className="panel-heading"><div><div className="eyebrow">АВТОЗАПОЛНЕНИЕ ИЗ ИСТОЧНИКОВ</div><h2>Собрать расчёт из документов</h2></div></div>
+      <p className="form-hint">Выберите один или несколько файлов PDF/DOCX: например, загрузочное условие и книгу остойчивости. Файлы сохранятся в архиве судна, найденные поля с источниками подставятся в форму ниже.</p>
+      <div className="form-grid"><label className="wide-field">Судовые документы<input type="file" accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onChange={event => setImportFiles(Array.from(event.target.files ?? []))} /></label></div>
+      {importFiles.length > 0 && <p className="form-hint">Выбрано: {importFiles.map(file => file.name).join(" · ")}</p>}
+      <div className="form-actions"><button type="button" className="primary-button" onClick={() => void importDocuments()} disabled={importBusy || apiState !== "online" || !vesselId || !importFiles.length}>{importBusy ? "Чтение документов…" : "Извлечь и заполнить форму"}</button></div>
+      <p className="form-hint">Сейчас обрабатывается текстовый слой и структура таблиц. Сканированные страницы, чертежи и графики требуют OCR и визуальной сверки.</p>
+    </section>
     <form onSubmit={calculate}>
       <section className="panel vessel-form-panel">
         <div className="panel-heading"><div><div className="eyebrow">ОСНОВНЫЕ ВХОДНЫЕ ДАННЫЕ</div><h2>Загрузочное условие</h2></div></div>
@@ -194,8 +273,11 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
           <label>Название условия<input required value={name} onChange={event => setName(event.target.value)} maxLength={120} placeholder="Например, оптимальный план" /></label>
           <label>Ревизия исходных данных<input required value={revision} onChange={event => setRevision(event.target.value)} maxLength={80} placeholder="Документ и ревизия таблиц" /></label>
           <label>LBP, м<input required type="number" min="0.001" step="0.001" value={lbp} onChange={event => setLbp(event.target.value)} /></label>
+          <label>Источник LBP<input required minLength={3} value={lbpSource} onChange={event => setLbpSource(event.target.value)} placeholder="Документ, таблица, строка" /></label>
           <label>Плотность забортной воды, т/м³<input required type="number" min="0.501" max="1.5" step="0.001" value={density} onChange={event => setDensity(event.target.value)} /></label>
+          <label>Источник плотности<input required minLength={3} value={densitySource} onChange={event => setDensitySource(event.target.value)} placeholder="Документ, таблица, строка" /></label>
           <label className="wide-field">Система координат и datum<input required value={coordinate} onChange={event => setCoordinate(event.target.value)} placeholder="Откуда начало; направления X/Y/Z; основная плоскость" /></label>
+          <label className="wide-field">Источник системы координат<input required minLength={3} value={coordinateSource} onChange={event => setCoordinateSource(event.target.value)} placeholder="Документ, раздел или таблица" /></label>
         </div>
       </section>
       <section className="panel vessel-form-panel">
@@ -230,6 +312,7 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
           <label>KN, м<input required type="number" step="0.001" value={row.kn_m} onChange={event => updateKn(index,"kn_m",event.target.value)} /></label>
           <label className="wide-field">Источник точки<input required minLength={3} value={row.source_reference} onChange={event => updateKn(index,"source_reference",event.target.value)} placeholder="Документ, страница, таблица и угол" /></label>
         </div><div className="form-actions"><button type="button" className="secondary-button" onClick={() => setKnCurve(current => current.filter((_,i) => i !== index))}>Удалить точку</button></div></div>)}
+        {needsSourceReview && <label className="source-review-check"><input type="checkbox" required checked={sourceReviewConfirmed} onChange={event => setSourceReviewConfirmed(event.target.checked)} /> Я сверил извлечённые значения, единицы и ссылки на источники с оригиналами документов.</label>}
         <div className="form-actions"><button className="primary-button" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Вычисление…" : "Выполнить и сохранить расчёт"}</button></div>
       </section>
     </form>
@@ -253,7 +336,7 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
         <p className="form-hint">{result.calculation_result.stability_curve.note}</p>
       </div>}
       <ul>{result.calculation_result.warnings.map((warning,index) => <li key={index}>{warning}</li>)}</ul>
-      {result.calculation_input && <div className="calculation-provenance"><h3>Источники сохранённого расчёта</h3><p><strong>Система координат:</strong> {result.calculation_input.coordinate_convention}</p><ul><li>Порожнее судно: {result.calculation_input.lightship.source_reference}</li>{result.calculation_input.items.map((item,index) => <li key={`weight-${index}`}>{item.name}: {item.source_reference}</li>)}{result.calculation_input.hydrostatic_table.map((row,index) => <li key={`hydro-${index}`}>Гидростатика {index+1}: {row.source_reference}</li>)}{result.calculation_input.kn_curve?.map((point,index) => <li key={`kn-${index}`}>KN, точка {index+1}: {point.source_reference}</li>)}</ul></div>}
+      {result.calculation_input && <div className="calculation-provenance"><h3>Источники сохранённого расчёта</h3><ul><li>LBP: {result.calculation_input.lbp_source_reference}</li><li>Плотность: {result.calculation_input.seawater_density_source_reference}</li><li>Координаты: {result.calculation_input.coordinate_source_reference} — {result.calculation_input.coordinate_convention}</li><li>Порожнее судно: {result.calculation_input.lightship.source_reference}</li>{result.calculation_input.items.map((item,index) => <li key={`weight-${index}`}>{item.name}: {item.source_reference}</li>)}{result.calculation_input.hydrostatic_table.map((row,index) => <li key={`hydro-${index}`}>Гидростатика {index+1}: {row.source_reference}</li>)}{result.calculation_input.kn_curve?.map((point,index) => <li key={`kn-${index}`}>KN, точка {index+1}: {point.source_reference}</li>)}</ul></div>}
     </section>}
     <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">НЕИЗМЕНЯЕМАЯ ИСТОРИЯ</div><h2>Сохранённые расчёты</h2></div></div>
       {!vesselId ? <div className="empty-state">Выберите судно.</div> : history.length === 0 ? <div className="empty-state">Расчётов пока нет.</div> : <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Условие</th><th>Водоизмещение</th><th>Средняя осадка</th><th>Версия</th><th></th></tr></thead><tbody>{history.map(run => <tr key={run.id}><td><strong>{run.name}</strong><small>{new Date(run.created_at).toLocaleString("ru-RU")} · {run.status}</small></td><td>{fmt(run.displacement_t,1)} т</td><td>{fmt(run.mean_draft_m,3)} м</td><td>{run.engine_version}</td><td><button type="button" className="secondary-button" onClick={() => void openRun(run.id)}>Открыть</button></td></tr>)}</tbody></table></div>}

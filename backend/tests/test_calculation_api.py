@@ -13,8 +13,11 @@ def calculation_payload(vessel_id: str) -> dict:
         "name": "КП: оптимальный план",
         "vessel_data_revision": "course-project-reference",
         "coordinate_convention": "Начало в AP на ОП; X в нос, Y на ЛБ, Z вверх.",
+        "coordinate_source_reference": "КП, описание системы координат",
         "lbp_m": 283.1,
+        "lbp_source_reference": "КП, таблица 1, строка LBP",
         "seawater_density_t_m3": 1.018,
+        "seawater_density_source_reference": "КП, таблица 8, строка плотности воды",
         "lightship": {
             "mass_t": 47087.2,
             "lcg_m": 119.245,

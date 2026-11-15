@@ -32,6 +32,11 @@ from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
 from app.services.dataset_coverage import build_dataset_coverage
+from app.services.document_calculation_import import (
+    SourceArtifact,
+    build_calculation_draft,
+    read_docx_tables,
+)
 from app.services.loading_calculations import (
     CalculationInputError,
     HydrostaticPoint,
@@ -145,7 +150,7 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
 
 _DOCUMENT_STORAGE = Path(__file__).resolve().parents[1] / "data" / "documents"
 _MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
-_DOCUMENT_ANALYSIS_VERSION = 1
+_DOCUMENT_ANALYSIS_VERSION = 2
 _ALLOWED_DOCUMENT_TYPES = {"auto", "ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
 
 
@@ -166,13 +171,20 @@ async def upload_vessel_document(
     if document_type not in _ALLOWED_DOCUMENT_TYPES:
         raise HTTPException(status_code=422, detail="Неизвестный тип документа")
     original_name = Path(file.filename or "document.pdf").name[:255]
-    if Path(original_name).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=415, detail="Пока поддерживаются только PDF-документы")
+    suffix = Path(original_name).suffix.lower()
+    media_type = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }.get(suffix)
+    if media_type is None:
+        raise HTTPException(status_code=415, detail="Поддерживаются документы PDF и DOCX")
     content = await file.read(_MAX_DOCUMENT_BYTES + 1)
     if len(content) > _MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="Размер файла превышает 25 МБ")
-    if not content.startswith(b"%PDF-"):
+    if media_type == "application/pdf" and not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=415, detail="Файл не прошёл проверку сигнатуры PDF")
+    if media_type != "application/pdf" and not content.startswith(b"PK\x03\x04"):
+        raise HTTPException(status_code=415, detail="Файл не прошёл проверку сигнатуры DOCX")
     digest = hashlib.sha256(content).hexdigest()
     duplicate = session.scalar(
         select(SourceDocumentRecord).where(
@@ -183,32 +195,37 @@ async def upload_vessel_document(
     if duplicate is not None:
         raise HTTPException(status_code=409, detail="Этот файл уже загружен для данного судна")
     document_id = str(uuid.uuid4())
-    stored_name = f"{document_id}.pdf"
+    stored_name = f"{document_id}{suffix}"
     _DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
     storage_path = _DOCUMENT_STORAGE / stored_name
     try:
         # Many otherwise valid PDFs contain minor structural deviations.
         # Non-strict parsing tolerates these without changing the source bytes.
-        reader = PdfReader(BytesIO(content), strict=False)
-        if reader.is_encrypted:
-            try:
-                decrypted = reader.decrypt("")
-            except (ValueError, TypeError, NotImplementedError):
-                decrypted = 0
-            if not decrypted:
-                raise HTTPException(
-                    status_code=422,
-                    detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
-                )
-        # Some ship stability PDFs contain unusually complex vector content streams.
-        # Raise only the per-stream parsing-work budget, keeping it finite.
-        with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
-            pages = [
-                (index + 1, page.extract_text() or "")
-                for index, page in enumerate(reader.pages)
-            ]
-        if not pages:
-            raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+        if media_type == "application/pdf":
+            reader = PdfReader(BytesIO(content), strict=False)
+            if reader.is_encrypted:
+                try:
+                    decrypted = reader.decrypt("")
+                except (ValueError, TypeError, NotImplementedError):
+                    decrypted = 0
+                if not decrypted:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
+                    )
+            # Keep parsing bounded: ship PDFs can contain large vector drawings.
+            with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
+                pages = [
+                    (index + 1, page.extract_text() or "")
+                    for index, page in enumerate(reader.pages)
+                ]
+            if not pages:
+                raise HTTPException(status_code=422, detail="PDF не содержит страниц")
+        else:
+            docx_text, _ = read_docx_tables(content)
+            if not docx_text.strip():
+                raise HTTPException(status_code=422, detail="В DOCX не найден текст или таблицы")
+            pages = [(1, docx_text)]
     except HTTPException:
         raise
     except LimitReachedError as exc:
@@ -223,29 +240,31 @@ async def upload_vessel_document(
             ),
         ) from exc
     except Exception as exc:
-        logger.exception("Failed to parse uploaded PDF %s", original_name)
+        logger.exception("Failed to parse uploaded document %s", original_name)
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Не удалось обработать структуру PDF ({type(exc).__name__}: {exc}). "
-                "Проверьте файл или пересохраните его в PDF."
+                f"Не удалось обработать структуру документа ({type(exc).__name__}: {exc}). "
+                "Проверьте PDF/DOCX и попробуйте пересохранить файл."
             ),
         ) from exc
 
-    candidates = extract_principal_particulars(pages)
+    candidates = extract_principal_particulars(pages) if media_type == "application/pdf" else []
     resolved_document_type = (
         classify_document_type(pages, filename=original_name)
         if document_type == "auto" else document_type
     )
     has_text = any(text.strip() for _, text in pages)
-    extraction_status = "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
+    extraction_status = (
+        "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
+    ) if media_type == "application/pdf" else "DOCX_TABLES_EXTRACTED"
     storage_path.write_bytes(content)
     record = SourceDocumentRecord(
         id=document_id,
         vessel_id=vessel_id,
         original_filename=original_name,
         stored_filename=stored_name,
-        media_type="application/pdf",
+        media_type=media_type,
         size_bytes=len(content),
         sha256=digest,
         document_type=resolved_document_type,
@@ -261,6 +280,68 @@ async def upload_vessel_document(
         storage_path.unlink(missing_ok=True)
         raise
     return _document_summary(record)
+
+
+@app.post("/api/v1/vessels/{vessel_id}/calculation-import", tags=["documents", "calculations"])
+async def import_calculation_documents(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    files: Annotated[list[UploadFile], File()],
+) -> dict[str, object]:
+    """Archive source files and map supported document evidence into a reviewed draft."""
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    if not 1 <= len(files) <= 8:
+        raise HTTPException(status_code=422, detail="Выберите от 1 до 8 файлов PDF/DOCX")
+
+    artifacts: list[SourceArtifact] = []
+    contents: list[tuple[UploadFile, bytes]] = []
+    total_bytes = 0
+    for file in files:
+        original_name = Path(file.filename or "document").name
+        suffix = Path(original_name).suffix.lower()
+        expected_media_type = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }.get(suffix)
+        if expected_media_type is None:
+            raise HTTPException(status_code=415, detail=f"Формат {suffix or 'без расширения'} не поддерживается; выберите PDF или DOCX")
+        content = await file.read(_MAX_DOCUMENT_BYTES + 1)
+        if len(content) > _MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail=f"{original_name}: размер превышает 25 МБ")
+        total_bytes += len(content)
+        if total_bytes > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Общий размер выбранных документов превышает 50 МБ")
+        if expected_media_type == "application/pdf" and not content.startswith(b"%PDF-"):
+            raise HTTPException(status_code=415, detail=f"{original_name}: неверная сигнатура PDF")
+        if expected_media_type.endswith("wordprocessingml.document") and not content.startswith(b"PK\x03\x04"):
+            raise HTTPException(status_code=415, detail=f"{original_name}: неверная сигнатура DOCX")
+        contents.append((file, content))
+        artifacts.append(SourceArtifact(original_name, expected_media_type, content))
+
+    try:
+        imported = build_calculation_draft(artifacts)
+    except Exception as exc:
+        logger.exception("Failed to build calculation import for vessel %s", vessel_id)
+        raise HTTPException(status_code=422, detail=f"Не удалось извлечь данные: {type(exc).__name__}: {exc}") from exc
+
+    stored_documents: list[dict[str, object]] = []
+    for file, _content in contents:
+        await file.seek(0)
+        try:
+            stored_documents.append(await upload_vessel_document(vessel_id, session, file, "auto"))
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+            # Re-selecting an already archived source reuses its immutable record.
+            existing = session.scalar(select(SourceDocumentRecord).where(
+                SourceDocumentRecord.vessel_id == vessel_id,
+                SourceDocumentRecord.sha256 == hashlib.sha256(_content).hexdigest(),
+            ))
+            if existing is None:
+                raise
+            stored_documents.append(_document_summary(existing))
+    return {**imported, "documents": stored_documents}
 
 
 def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:

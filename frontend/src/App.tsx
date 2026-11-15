@@ -283,6 +283,8 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
   useEffect(() => {
     setReport(null);
     if (!selectedDocument) return;
+    const selected = documents.find(doc => doc.id === selectedDocument);
+    if (selected?.media_type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return;
     void fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/report`)
       .then(async response => {
         if (!response.ok) throw new Error("Не удалось получить полный отчёт анализа документа.");
@@ -290,7 +292,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       })
       .then(data => setReport(data.report))
       .catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка анализа документа."));
-  }, [selectedDocument]);
+  }, [selectedDocument, documents]);
   async function reviewCandidate(item: ExtractedCandidate, decision: "APPROVE" | "REJECT") {
     if (reviewerLabel.trim().length < 2) {
       setError("Укажите имя или должность проверяющего (не менее 2 символов).");
@@ -370,7 +372,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <div className="form-grid">
           <label>Судно<select value={vesselId} onChange={event => setVesselId(event.target.value)} required><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
           <input type="hidden" name="document_type" value="auto" /><div className="form-hint">Тип и состав документа определяются автоматически по его содержимому.</div>
-          <label>Файл PDF<input name="file" type="file" accept="application/pdf,.pdf" required /></label>
+          <label>Файл PDF или DOCX<input name="file" type="file" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required /></label>
         </div>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Загрузка…" : "Загрузить и извлечь данные"}</button></div>
       </form>
@@ -426,7 +428,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         </section>}
         <div className="form-hint"><strong>Ограничения анализа:</strong><ul>{report.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
       </div>}
-      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
+      {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : selected.extraction_status === "DOCX_TABLES_EXTRACTED" ? "Текст и таблицы DOCX сохранены. Откройте «Расчёты» и извлеките данные сразу из нескольких документов." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
         <div className="form-actions"><button className="primary-button" type="button" disabled={reviewingCandidate !== null || !candidates.some(item => item.review_status === "PENDING")} onClick={() => void approveAllCandidates()}>Подтвердить все ожидающие одной ревизией</button><span className="form-hint">Перед нажатием сверьте каждое значение и все указанные страницы с оригиналом.</span></div>
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат / подтверждено, м</th><th>Страницы</th><th>Фрагменты источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
