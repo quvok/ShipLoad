@@ -36,12 +36,12 @@ _KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
 }
 _SPECIAL_KIND_PATTERNS: dict[str, re.Pattern[str]] = {
     "free_surface": re.compile(
-        r"(?:tank name|cargo tank|ballast tank).{0,100}(?:F\\.?\\s*S\\.?\\s*M)|"
-        r"(?:F\\.?\\s*S\\.?\\s*M).{0,100}(?:T-M|tank)",
+        r"(?:tank name|cargo tank|ballast tank).{0,100}(?:F\.?\s*S\.?\s*M)|"
+        r"(?:F\.?\s*S\.?\s*M).{0,100}(?:T-M|tank)",
         re.IGNORECASE,
     ),
     "draft_corrections": re.compile(
-        r"draft correction values|aft mark\\s*[12].{0,80}mid mark.{0,80}fore mark",
+        r"draft correction values|aft mark\s*[12].{0,80}mid mark.{0,80}fore mark",
         re.IGNORECASE,
     ),
     "windage": re.compile(
@@ -57,7 +57,7 @@ _SPECIAL_KIND_PATTERNS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "propeller_immersion": re.compile(
-        r"propeller immersion|\\bdAp\\s*=",
+        r"propeller immersion|\bdAp\s*=",
         re.IGNORECASE,
     ),
     "trimming_table": re.compile(
