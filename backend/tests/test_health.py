@@ -43,7 +43,7 @@ def test_loading_condition_validation_endpoint() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "REVIEW_REQUIRED"
     assert response.json()["item_count"] == 1
-    assert "No displacement" in response.json()["message"]
+    assert "Расчёт водоизмещения" in response.json()["message"]
 
 
 def test_loading_condition_validation_rejects_missing_liquid_tank() -> None:
