@@ -8,3 +8,5 @@
 .notes-label{display:flex;flex-direction:column;gap:7px;margin-top:16px;color:#aebdca;font-size:11px}.notes-label textarea{width:100%;resize:vertical;min-height:58px;padding:9px 10px;background:#0c1825;border:1px solid #314458;border-radius:5px;color:#e5edf3;font:inherit;font-size:12px}.notes-label textarea:focus{outline:none;border-color:#55aeb8;box-shadow:0 0 0 2px #55aeb822}
 
 .load-item-editor{margin-top:20px;padding:15px;border:1px solid #293e51;border-radius:7px;background:#101e2c}.load-item-editor:first-child{margin-top:0}.load-item-editor .form-subheading{margin-top:0;margin-bottom:4px}.load-item-editor .form-actions{margin-top:12px}
+
+.vessel-table tbody tr.selected-row{background:#172a3b}.vessel-table tbody tr[onclick]{cursor:pointer}.vessel-table tbody tr[onclick]:hover{background:#1a3043}
