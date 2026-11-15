@@ -14,13 +14,23 @@ _PAGE_HINTS = re.compile(
     r"stability criteria|draft",
     re.IGNORECASE,
 )
-_KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASE)),
-    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASE)),
-    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASE)),
-    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASE)),
-    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASE)),
-)
+_KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "tank_capacity": (
+        re.compile(r"cargo tank|ballast tank|fuel tank|tank capacity|sounding|ullage|calibration", re.IGNORECASE),
+    ),
+    "strength": (
+        re.compile(r"shear force|bending moment|still water|longitudinal strength", re.IGNORECASE),
+    ),
+    "stability": (
+        re.compile(r"GZ curve|righting lever|heel angle|stability criteria|free surface moment|cross curve", re.IGNORECASE),
+    ),
+    "hydrostatics": (
+        re.compile(r"L\\.?\\s*C\\.?\\s*[BF]\\.?|\\bLCB\\b|\\bLCF\\b|\\bTPC\\b|\\bMCT\\b|hydrostatic|waterplane|\\bKM\\b|\\bKB\\b", re.IGNORECASE),
+    ),
+    "loading_condition": (
+        re.compile(r"loading condition|deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
+    ),
+}
 _LABELS = {
     "hydrostatics": "Гидростатическая таблица",
     "tank_capacity": "Таблица танков / вместимостей",
@@ -29,6 +39,16 @@ _LABELS = {
     "loading_condition": "Таблица загрузочного условия",
     "other": "Таблица (тип не определён)",
 }
+
+
+def _classify_table(sample: str) -> str:
+    """Classify by distinctive table content; generic displacement is not hydrostatics."""
+    scores = {
+        kind: sum(3 if index == 0 else 1 for index, pattern in enumerate(patterns) if pattern.search(sample))
+        for kind, patterns in _KIND_PATTERNS.items()
+    }
+    best_kind = max(scores, key=scores.get)
+    return best_kind if scores[best_kind] else "other"
 
 
 def _clean_cell(value: Any) -> str:
@@ -41,7 +61,7 @@ def extract_pdf_tables(
     pdf_path: str | Path,
     page_texts: list[tuple[int, str]],
     *,
-    max_candidate_pages: int = 40,
+    max_candidate_pages: int = 250,
     max_tables_per_page: int = 4,
     max_rows: int = 30,
     max_columns: int = 20,
@@ -79,13 +99,27 @@ def extract_pdf_tables(
                     continue
                 pages_checked.append(page_number)
                 try:
-                    found = page.extract_tables({
-                        "vertical_strategy": "lines",
-                        "horizontal_strategy": "lines",
-                        "intersection_tolerance": 5,
-                        "snap_tolerance": 4,
-                        "join_tolerance": 4,
-                    })
+                    strategies = (
+                        {
+                            "vertical_strategy": "lines",
+                            "horizontal_strategy": "lines",
+                            "intersection_tolerance": 5,
+                            "snap_tolerance": 4,
+                            "join_tolerance": 4,
+                        },
+                        {
+                            "vertical_strategy": "text",
+                            "horizontal_strategy": "text",
+                            "text_x_tolerance": 3,
+                            "text_y_tolerance": 3,
+                            "intersection_tolerance": 5,
+                        },
+                    )
+                    found = []
+                    for table_settings in strategies:
+                        found = page.extract_tables(table_settings)
+                        if found:
+                            break
                     # A table must have at least two non-empty rows and two columns.
                     for raw_table in found[:max_tables_per_page]:
                         rows = [
@@ -96,10 +130,7 @@ def extract_pdf_tables(
                         if len(rows) < 2 or max((len(row) for row in rows), default=0) < 2:
                             continue
                         sample = " ".join(cell for row in rows[:8] for cell in row)
-                        kind = next(
-                            (key for key, pattern in _KIND_HINTS if pattern.search(sample)),
-                            "other",
-                        )
+                        kind = _classify_table(sample)
                         tables.append({
                             "page": page_number,
                             "kind": kind,
@@ -139,6 +170,6 @@ def extract_pdf_tables(
         "note": (
             "Найдены табличные фрагменты. Это предварительное извлечение, а не проверенные судовые данные."
             if tables else
-            "На выбранных страницах не удалось выделить таблицы с помощью линейной структуры PDF. Таблицы без линий, изображения и сложные схемы могут быть пропущены."
+            "На выбранных страницах не удалось выделить таблицы ни по линиям, ни по текстовой структуре. Изображения и сложные схемы всё ещё требуют OCR/vision обработки."
         ),
     }
