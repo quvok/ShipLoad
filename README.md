@@ -13,19 +13,59 @@ Browser-based vessel loading, draft, trim and stability workspace.
 - Calculate displacement, centres of gravity, draft/trim, free-surface effects and stability outputs using vessel-specific approved data.
 - Preserve calculation inputs, software version, data provenance and validation status in every report.
 
-## Planned architecture
+## Architecture
 
-- `frontend/`: React + TypeScript browser application.
+- `frontend/`: React + TypeScript + Vite browser application.
 - `backend/`: Python + FastAPI API and calculation services.
-- `docs/`: engineering decisions, domain model, validation and safety requirements.
-- PostgreSQL: vessel profiles, source documents, reviewed hydrostatic/tank data and loading conditions.
-- Object storage: original documents and generated reports.
+- `docs/`: architecture, domain model, validation and safety requirements.
+- Planned persistence: PostgreSQL; planned object storage for original documents and generated reports.
 
 The calculation engine is deliberately separated from document parsing and the user interface. OCR/LLM extraction may propose data, but it must never silently become authoritative calculation input.
 
-## Development status
+## Current implementation
 
-The repository is being initialized. No vessel-specific data, approved calculation model, or validated operational calculation is included yet.
+- Initial responsive web workspace dashboard.
+- FastAPI health and development-status endpoints.
+- Guarded linear table interpolation primitive that rejects extrapolation and malformed tables.
+- Backend tests for API status and interpolation boundaries.
+- GitHub Actions workflow for backend lint/tests and frontend production build.
+
+Not implemented yet: vessel persistence, authentication, document upload/extraction, reviewed hydrostatic/tank data, loading-condition management, vessel-specific stability calculations, criteria evaluation and report generation. No vessel-specific data or validated operational calculation is included.
+
+## Local development
+
+### Backend
+
+Requires Python 3.12+.
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+uvicorn app.main:app --reload
+```
+
+API health: `http://127.0.0.1:8000/health`
+
+Run tests and lint:
+
+```bash
+pytest -q
+ruff check app tests
+```
+
+### Frontend
+
+Requires Node.js 22+.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite development server starts at `http://localhost:5173`.
 
 ## Development principles
 
@@ -36,7 +76,8 @@ The repository is being initialized. No vessel-specific data, approved calculati
 5. All calculations are deterministic and covered by tests using independently verified reference cases.
 6. Regulatory criteria and applicability must be explicitly configured for the vessel; no universal pass/fail shortcut.
 7. Reports distinguish calculated, imported, assumed and user-entered values.
+8. A passing software test is not evidence that a vessel is safe or that the application is approved.
 
-## Planned local development
+## Safety and validation
 
-Backend and frontend setup instructions will be added with their first runnable application scaffolds.
+Read [Safety and Validation](docs/SAFETY_AND_VALIDATION.md) before implementing or interpreting calculation outputs. Operational use requires independent engineering verification and any applicable flag, class and company approval.
