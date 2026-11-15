@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import math
 import uuid
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+from pypdf.errors import LimitReachedError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,8 @@ from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
 from app.services.vessel_document_extractor import extract_principal_particulars
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="ShipLoad API",
@@ -171,10 +175,25 @@ async def upload_vessel_document(
             raise HTTPException(status_code=422, detail="PDF не содержит страниц")
     except HTTPException:
         raise
-    except Exception as exc:
+    except LimitReachedError as exc:
+        logger.exception("PDF parser limit reached for uploaded file %s", original_name)
+        reason = str(exc).strip() or "достигнут внутренний лимит парсера"
         raise HTTPException(
             status_code=422,
-            detail=f"Не удалось обработать структуру PDF ({type(exc).__name__}). Проверьте файл или пересохраните его в PDF.",
+            detail=(
+                "Парсер PDF остановил обработку из-за ограничения безопасности: "
+                f"{reason}. Не отключайте ограничения; проверьте PDF и передайте "
+                "эту причину для диагностики."
+            ),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Failed to parse uploaded PDF %s", original_name)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Не удалось обработать структуру PDF ({type(exc).__name__}: {exc}). "
+                "Проверьте файл или пересохраните его в PDF."
+            ),
         ) from exc
 
     candidates = extract_principal_particulars(pages)
