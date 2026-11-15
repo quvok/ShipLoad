@@ -177,3 +177,45 @@ def test_candidate_approval_rejects_out_of_range_corrected_value():
         },
     )
     assert response.status_code == 422
+
+
+
+def test_candidate_review_rejects_inconsistent_dimensions_in_new_revision():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Review vessel", "vessel_type": "general_cargo"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    first = client.post(
+        f"/api/v1/documents/{document_id}/candidates/0/decision",
+        json={
+            "decision": "APPROVE",
+            "reviewer_label": "Проверяющий",
+            "approved_value": 100,
+        },
+    )
+    assert first.status_code == 201
+
+    inconsistent = client.post(
+        f"/api/v1/documents/{document_id}/candidates/1/decision",
+        json={
+            "decision": "APPROVE",
+            "reviewer_label": "Проверяющий",
+            "approved_value": 111,
+        },
+    )
+    assert inconsistent.status_code == 422
+
+
+def test_candidate_review_rejects_blank_reviewer_label():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Review vessel", "vessel_type": "general_cargo"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/0/decision",
+        json={"decision": "APPROVE", "reviewer_label": "   "},
+    )
+    assert response.status_code == 422
