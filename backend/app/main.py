@@ -473,6 +473,9 @@ def decide_document_candidate(
             "proposed_value": proposed_value,
             "approved_value": approved_value,
             "unit": "m",
+            "evidence": candidate.get("evidence", [
+                {"page": int(candidate["page"]), "matched_text": str(candidate["matched_text"])}
+            ]),
             "decision_id": decision.id,
             "reviewer_label": decision.reviewer_label,
             "decided_at": datetime.now(UTC).isoformat(),
