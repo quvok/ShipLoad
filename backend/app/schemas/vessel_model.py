@@ -68,11 +68,14 @@ class CompartmentDefinition(BaseModel):
     capacity_source: SourceReference | None = None
 
     @model_validator(mode="after")
-    def validate_capacity_data(self) -> "CompartmentDefinition":
+    def validate_capacity_data(self) -> CompartmentDefinition:
         if self.capacity_curve and self.capacity_source is None:
             raise ValueError("A capacity curve requires its source reference")
-        if self.maximum_volume_m3 is not None and self.capacity_curve:
-            if max(point.volume_m3 for point in self.capacity_curve) > self.maximum_volume_m3 + 1e-6:
+        if (
+            self.maximum_volume_m3 is not None
+            and self.capacity_curve
+            and max(point.volume_m3 for point in self.capacity_curve) > self.maximum_volume_m3 + 1e-6
+        ):
                 raise ValueError("Capacity curve exceeds documented maximum volume")
         if self.capacity_curve:
             parameters = [point.filling_parameter for point in self.capacity_curve]
@@ -133,7 +136,7 @@ class VesselCalculationModel(BaseModel):
     lightship_source: SourceReference | None = None
 
     @model_validator(mode="after")
-    def validate_model_consistency(self) -> "VesselCalculationModel":
+    def validate_model_consistency(self) -> VesselCalculationModel:
         codes = [space.code for space in self.compartments]
         if len(codes) != len(set(codes)):
             raise ValueError("Compartment codes must be unique within a vessel")
