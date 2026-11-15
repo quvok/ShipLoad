@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-type NavKey = "overview" | "vessels" | "documents" | "loading" | "reports";
+type NavKey = "overview" | "vessels" | "tanks" | "documents" | "loading" | "reports";
 type VesselType = "general_cargo" | "container" | "bulk_carrier" | "tanker" | "multipurpose" | "other";
 type Vessel = {
   id: string; name: string; vessel_type: VesselType; loa_m: number; lbp_m: number;
@@ -8,6 +8,7 @@ type Vessel = {
 };
 const navigation: { key: NavKey; label: string; icon: string }[] = [
   { key: "overview", label: "Обзор", icon: "◫" }, { key: "vessels", label: "Суда", icon: "▤" },
+  { key: "tanks", label: "Танки", icon: "▥" },
   { key: "documents", label: "Документы", icon: "▧" }, { key: "loading", label: "Загрузочные условия", icon: "⌁" },
   { key: "reports", label: "Расчёты", icon: "▥" },
 ];
@@ -88,7 +89,9 @@ function App() {
       <main className="main">
         <header className="topbar"><div><span className="breadcrumb">Рабочая область</span><span className="slash">/</span><strong>{navigation.find((item) => item.key === active)?.label}</strong></div><div className="topbar-right"><span className="env-tag">РАЗРАБОТКА</span><a className="help-button" href="https://github.com/quvok/ShipLoad" target="_blank" rel="noreferrer">Репозиторий ↗</a></div></header>
         <section className="content">
-          {active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "vessels" ? (
+          {active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
+            <TanksPage vessels={vessels} apiState={apiState} />
+          ) : active === "vessels" ? (
             <VesselsPage vessels={vessels} apiState={apiState} showForm={showForm} setShowForm={setShowForm}
               onSubmit={createVessel} loading={loading} error={error} success={success} onRefresh={loadVessels} />
           ) : (
@@ -158,6 +161,93 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
     <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ЛОКАЛЬНАЯ БАЗА ДАННЫХ</div><h2>Зарегистрированные суда</h2></div><button className="secondary-button" onClick={onRefresh}>Обновить</button></div>
       {vessels.length === 0 ? <div className="empty-state"><div className="empty-icon">▤</div><strong>Список судов пуст</strong><p>Создайте первый профиль. Запись будет сохранена в локальной SQLite-базе backend.</p></div> :
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Тип</th><th>LOA × B, м</th><th>LBP, м</th><th>Статус данных</th></tr></thead><tbody>{vessels.map((vessel) => <tr key={vessel.id}><td><strong>{vessel.name}</strong><small>{vessel.id}</small></td><td>{vesselTypes.find((type) => type.value === vessel.vessel_type)?.label ?? vessel.vessel_type}</td><td>{vessel.loa_m} × {vessel.moulded_breadth_m}</td><td>{vessel.lbp_m}</td><td><span className="draft-tag">{vessel.data_status}</span></td></tr>)}</tbody></table></div>}
+    </section>
+  </>;
+}
+
+type TankType = "ballast" | "fuel_oil" | "diesel_oil" | "fresh_water" | "lubricating_oil" | "sewage" | "sludge" | "other";
+type Tank = {
+  id: string; vessel_id: string; tank_code: string; name: string; tank_type: TankType;
+  nominal_capacity_m3: number | null; arrangement_source_reference: string;
+  capacity_source_reference: string | null; data_status: string;
+};
+const tankTypes: { value: TankType; label: string }[] = [
+  { value: "ballast", label: "Балластный" }, { value: "fuel_oil", label: "Топливный" },
+  { value: "diesel_oil", label: "Дизельное топливо" }, { value: "fresh_water", label: "Пресная вода" },
+  { value: "lubricating_oil", label: "Смазочное масло" }, { value: "sewage", label: "Сточные воды" },
+  { value: "sludge", label: "Шлам" }, { value: "other", label: "Другой" },
+];
+function TanksPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checking" | "online" | "offline" }) {
+  const [vesselId, setVesselId] = useState("");
+  const [tanks, setTanks] = useState<Tank[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const loadTanks = useCallback(async (id: string) => {
+    if (!id) { setTanks([]); return; }
+    const response = await fetch(`${API}/vessels/${encodeURIComponent(id)}/tanks`);
+    if (!response.ok) throw new Error("Не удалось получить реестр танков.");
+    setTanks(await response.json() as Tank[]);
+  }, []);
+  useEffect(() => {
+    setError("");
+    void loadTanks(vesselId).catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка загрузки реестра."));
+  }, [vesselId, loadTanks]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setError(""); setNotice("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const capacityText = String(form.get("nominal_capacity_m3") ?? "").trim();
+    const payload = {
+      tank_code: String(form.get("tank_code") ?? "").trim(),
+      name: String(form.get("name") ?? "").trim(),
+      tank_type: form.get("tank_type"),
+      nominal_capacity_m3: capacityText ? Number(capacityText) : null,
+      arrangement_source_reference: String(form.get("arrangement_source_reference") ?? "").trim(),
+      capacity_source_reference: String(form.get("capacity_source_reference") ?? "").trim() || null,
+    };
+    try {
+      const response = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/tanks`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        const detail = body?.detail;
+        throw new Error(typeof detail === "string" ? detail : "Сервер отклонил данные. Проверьте вместимость и ссылки на документы.");
+      }
+      await loadTanks(vesselId);
+      formElement.reset();
+      setNotice("Танк зарегистрирован со статусом REVIEW_REQUIRED. Калибровочные таблицы ещё не загружены.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Не удалось сохранить танк.");
+    } finally { setBusy(false); }
+  }
+
+  return <>
+    <div className="page-heading"><div><div className="eyebrow">ТЕХНИЧЕСКИЕ ДАННЫЕ СУДНА</div><h1>Реестр танков</h1><p>Идентификация танков и регистрация подтверждённых документами исходных сведений.</p></div></div>
+    <div className="notice"><span className="notice-icon">!</span><div><strong>Реестр — ещё не калибровочная модель</strong><p>Номинальная вместимость не позволяет определить фактический объём, массу, центр тяжести или поправку на свободную поверхность. Для этого потребуются проверенные таблицы замеров конкретного танка.</p></div></div>
+    {apiState !== "online" && <div className="inline-alert error">Нет подключения к локальному API.</div>}
+    {error && <div className="inline-alert error">{error}</div>}{notice && <div className="inline-alert success">{notice}</div>}
+    <section className="panel vessel-form-panel">
+      <div className="panel-heading"><div><div className="eyebrow">НОВАЯ ЗАПИСЬ</div><h2>Зарегистрировать танк</h2></div></div>
+      {vessels.length === 0 ? <div className="empty-state"><strong>Сначала зарегистрируйте судно</strong><p>Танк должен принадлежать конкретному судну.</p></div> : <form onSubmit={submit}>
+        <div className="form-grid">
+          <label>Судно<select required value={vesselId} onChange={event => setVesselId(event.target.value)}><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+          <label>Идентификатор танка<input name="tank_code" required maxLength={80} placeholder="Как в плане расположения танков" /></label>
+          <label>Название<input name="name" required maxLength={120} placeholder="Название по судовой документации" /></label>
+          <label>Тип танка<select name="tank_type" required defaultValue="ballast">{tankTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></label>
+          <label>Номинальная вместимость, м³<input name="nominal_capacity_m3" type="number" min="0.001" step="0.001" placeholder="Необязательно" /></label>
+          <label>Источник вместимости<input name="capacity_source_reference" maxLength={500} placeholder="Таблица вместимости, лист / страница" /></label>
+          <label>Источник идентификации<input name="arrangement_source_reference" required minLength={3} maxLength={500} placeholder="План расположения танков, лист / страница" /></label>
+        </div>
+        <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Сохранение…" : "Сохранить танк"}</button></div>
+      </form>}
+    </section>
+    <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ЛОКАЛЬНАЯ БАЗА ДАННЫХ</div><h2>Танки выбранного судна</h2></div><button className="secondary-button" onClick={() => void loadTanks(vesselId).catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка загрузки."))} disabled={!vesselId}>Обновить</button></div>
+      {!vesselId ? <div className="empty-state"><p>Выберите судно, чтобы просмотреть его танки.</p></div> : tanks.length === 0 ? <div className="empty-state"><strong>Танки ещё не зарегистрированы</strong><p>Добавьте их по плану расположения танков.</p></div> :
+      <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Идентификатор / название</th><th>Тип</th><th>Вместимость, м³</th><th>Источник вместимости</th><th>Статус</th></tr></thead><tbody>{tanks.map(t => <tr key={t.id}><td><strong>{t.tank_code}</strong><small>{t.name}</small></td><td>{tankTypes.find(x => x.value === t.tank_type)?.label ?? t.tank_type}</td><td>{t.nominal_capacity_m3 ?? "Не указана"}</td><td>{t.capacity_source_reference ?? "—"}</td><td><span className="draft-tag">{t.data_status}</span></td></tr>)}</tbody></table></div>}
     </section>
   </>;
 }
