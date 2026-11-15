@@ -3,9 +3,10 @@
 These utilities are not a vessel stability model. They deliberately refuse to
 extrapolate because approved vessel tables define the supported calculation range.
 """
+import itertools
+import math
 from bisect import bisect_left
 from collections.abc import Sequence
-import math
 
 
 class TableRangeError(ValueError):
@@ -34,7 +35,7 @@ def linear_interpolate(
     if any(not _is_finite(value) for value in [x, *xs, *ys]):
         raise InvalidTableError("All coordinates and values must be finite")
 
-    if any(right <= left for left, right in zip(xs, xs[1:])):
+    if any(right <= left for left, right in itertools.pairwise(xs)):
         raise InvalidTableError("Table x coordinates must be strictly increasing")
 
     if x < xs[0] or x > xs[-1]:
