@@ -44,7 +44,8 @@ def extract_pdf_tables(
     max_candidate_pages: int = 40,
     max_tables_per_page: int = 4,
     max_rows: int = 30,
-    max_columns: int = 20,\n    max_page_stream_bytes: int = 5 * 1024 * 1024,
+    max_columns: int = 20,
+    max_page_stream_bytes: int = 5 * 1024 * 1024,
 ) -> dict[str, object]:
     """Extract bounded table previews only from pages with relevant text hints.
 
@@ -58,7 +59,8 @@ def extract_pdf_tables(
     selected_pages = candidates[:max_candidate_pages]
     skipped_pages = candidates[max_candidate_pages:]
     tables: list[dict[str, object]] = []
-    page_errors: list[dict[str, object]] = []\n    pages_skipped_complex: list[int] = []
+    page_errors: list[dict[str, object]] = []
+    pages_skipped_complex: list[int] = []
 
     try:
         with pdfplumber.open(str(pdf_path), laparams=None) as pdf:
