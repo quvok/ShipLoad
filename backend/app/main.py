@@ -243,7 +243,10 @@ def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
         "sha256": record.sha256,
         "document_type": record.document_type,
         "extraction_status": record.extraction_status,
-        "candidate_count": len(record.extracted_candidates),
+        "candidate_count": len({
+            (item.get("field"), item.get("value"), item.get("unit"))
+            for item in record.extracted_candidates
+        }),
         "uploaded_at": record.uploaded_at.isoformat(),
     }
 
@@ -374,23 +377,67 @@ def get_document_candidates(
             )
         )
     }
-    candidates = []
+    grouped: dict[tuple[object, ...], dict[str, object]] = {}
     for index, candidate in enumerate(record.extracted_candidates):
         decision = decisions.get(index)
-        candidates.append({
-            **candidate,
-            "candidate_index": index,
-            "review_status": decision.decision if decision else "PENDING",
-            "decision": (
-                {
-                    "reviewer_label": decision.reviewer_label,
-                    "decided_at": decision.decided_at.isoformat(),
-                    "comment": decision.comment,
-                    "approved_value": decision.approved_value,
-                    "revision_number": decision.revision_number,
-                } if decision else None
-            ),
-        })
+        review_status = decision.decision if decision else "PENDING"
+        approved_value = decision.approved_value if decision else None
+        reviewer = decision.reviewer_label if decision else None
+        # Pending legacy duplicates remain individually actionable. Reviewed
+        # duplicates can be displayed together only when their decisions agree.
+        identity: tuple[object, ...] = (
+            candidate.get("field"),
+            candidate.get("value"),
+            candidate.get("unit"),
+            review_status,
+            approved_value,
+            reviewer,
+            index if review_status == "PENDING" else None,
+        )
+        evidence = candidate.get("evidence") or [{
+            "page": candidate.get("page"),
+            "matched_text": candidate.get("matched_text"),
+        }]
+        decision_data = (
+            {
+                "reviewer_label": decision.reviewer_label,
+                "decided_at": decision.decided_at.isoformat(),
+                "comment": decision.comment,
+                "approved_value": decision.approved_value,
+                "revision_number": decision.revision_number,
+            } if decision else None
+        )
+        if identity not in grouped:
+            grouped[identity] = {
+                **candidate,
+                "candidate_index": index,
+                "candidate_indices": [index],
+                "review_status": review_status,
+                "evidence": list(evidence),
+                "decisions": [decision_data] if decision_data else [],
+                "decision": decision_data,
+            }
+            continue
+        item = grouped[identity]
+        item["candidate_indices"].append(index)
+        for source in evidence:
+            if source not in item["evidence"]:
+                item["evidence"].append(source)
+        if decision_data:
+            item["decisions"].append(decision_data)
+    candidates = []
+    for item in grouped.values():
+        decision_rows = item["decisions"]
+        if decision_rows:
+            revision_numbers = sorted({
+                row["revision_number"] for row in decision_rows
+                if row["revision_number"] is not None
+            })
+            item["decision"] = {
+                **decision_rows[0],
+                "revision_numbers": revision_numbers,
+            }
+        candidates.append(item)
     return {
         "document_id": record.id,
         "filename": record.original_filename,
