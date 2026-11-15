@@ -21,25 +21,25 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
         r"\b(?:LOA|L\.?O\.?A\.?|length\s+overall)\b[^\d\n]{0,50}"
         r"(\d{1,4}(?:[.,]\d{1,3})?)"
         r"\s*(?:m|metres?|meters?)\b",
-        re.I,
+        re.IGNORECASE,
     ),
     "lbp_m": re.compile(
         r"\b(?:LBP|L\.?B\.?P\.?|length\s+between\s+perpendiculars)\b[^\d\n]{0,60}"
         r"(\d{1,4}(?:[.,]\d{1,3})?)"
         r"\s*(?:m|metres?|meters?)\b",
-        re.I,
+        re.IGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
         r"\b(?:moulded\s+breadth|moulded\s+beam|breadth)\b[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)"
         r"\s*(?:m|metres?|meters?)\b",
-        re.I,
+        re.IGNORECASE,
     ),
     "moulded_depth_m": re.compile(
         r"\b(?:moulded\s+depth|depth)\b[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)"
         r"\s*(?:m|metres?|meters?)\b",
-        re.I,
+        re.IGNORECASE,
     ),
 }
 
