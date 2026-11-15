@@ -38,17 +38,17 @@ class VesselCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     vessel_type: VesselType
-    loa_m: float = Field(gt=0, le=1000, allow_inf_nan=False)
-    lbp_m: float = Field(gt=0, le=1000, allow_inf_nan=False)
-    moulded_breadth_m: float = Field(gt=0, le=250, allow_inf_nan=False)
-    moulded_depth_m: float = Field(gt=0, le=150, allow_inf_nan=False)
-    coordinate_convention: CoordinateConvention
+    loa_m: float | None = Field(default=None, gt=0, le=1000, allow_inf_nan=False)
+    lbp_m: float | None = Field(default=None, gt=0, le=1000, allow_inf_nan=False)
+    moulded_breadth_m: float | None = Field(default=None, gt=0, le=250, allow_inf_nan=False)
+    moulded_depth_m: float | None = Field(default=None, gt=0, le=150, allow_inf_nan=False)
+    coordinate_convention: CoordinateConvention | None = None
 
     @model_validator(mode="after")
     def validate_principal_dimensions(self) -> "VesselCreate":
-        if self.lbp_m > self.loa_m:
+        if self.lbp_m is not None and self.loa_m is not None and self.lbp_m > self.loa_m:
             raise ValueError("LBP cannot exceed LOA")
-        if self.moulded_breadth_m > self.loa_m:
+        if self.moulded_breadth_m is not None and self.loa_m is not None and self.moulded_breadth_m > self.loa_m:
             raise ValueError("Moulded breadth cannot exceed LOA")
         return self
 
@@ -59,10 +59,10 @@ class VesselRead(BaseModel):
     id: str
     name: str
     vessel_type: VesselType
-    loa_m: float
-    lbp_m: float
-    moulded_breadth_m: float
-    moulded_depth_m: float
-    coordinate_convention: CoordinateConvention
+    loa_m: float | None
+    lbp_m: float | None
+    moulded_breadth_m: float | None
+    moulded_depth_m: float | None
+    coordinate_convention: CoordinateConvention | None
     data_status: str
     created_at: datetime
