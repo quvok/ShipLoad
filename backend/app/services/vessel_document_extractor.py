@@ -28,14 +28,18 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
-        r"\b(?:(?:moulded|molded)\s+breadth|(?:moulded|molded)\s+beam|breadth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
+        r"\b(?:(?:moulded|molded)\s+breadth|(?:moulded|molded)\s+beam|
+        r"breadth\s*\(\s*(?:moulded|molded)\s*\)|breadth(?:\s+(?:mld|moulded|molded))?)[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
+    ),
     "moulded_depth_m": re.compile(
-        r"\b(?:(?:moulded|molded)\s+depth|depth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
+        r"\b(?:(?:moulded|molded)\s+depth|depth\s*\(\s*(?:moulded|molded)\s*\)|
+        r"depth(?:\s+(?:mld|moulded|molded))?)[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
+    ),
     ),
 }
 
