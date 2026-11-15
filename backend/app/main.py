@@ -329,6 +329,7 @@ def decide_document_candidate(
         raise HTTPException(status_code=422, detail="Для отклонения значение указывать нельзя")
 
     decision = DocumentCandidateDecisionRecord(
+        id=str(uuid.uuid4()),
         document_id=document_id,
         candidate_index=candidate_index,
         field=field,
