@@ -12,14 +12,14 @@ _PAGE_HINTS = re.compile(
     r"hydrostatic|L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|KM\s*[=:]|tank|sounding|ullage|capacity|"
     r"displacement|deadweight|GZ|righting lever|shear force|bending moment|"
     r"stability criteria|draft",
-    re.IGNORECASEGNORECASE,
+    re.IGNORECASE,
 )
 _KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASEGNORECASE)),
-    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASEGNORECASE)),
-    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASEGNORECASE)),
-    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASEGNORECASE)),
-    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASEGNORECASE)),
+    ("hydrostatics", re.compile(r"L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.IGNORECASE)),
+    ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.IGNORECASE)),
+    ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.IGNORECASE)),
+    ("strength", re.compile(r"shear force|bending moment|still water|strength", re.IGNORECASE)),
+    ("loading_condition", re.compile(r"draft|deadweight|loading condition|displacement", re.IGNORECASE)),
 )
 _LABELS = {
     "hydrostatics": "Гидростатическая таблица",
@@ -130,7 +130,7 @@ def extract_pdf_tables(
     return {
         "status": "TABLE_PREVIEWS_FOUND" if tables else "NO_TABLE_PREVIEWS_FOUND",
         "candidate_pages": candidates,
-        "pages_checked": selected_pages,
+        "pages_checked": pages_checked,
         "pages_skipped_by_limit": skipped_pages,
         "pages_skipped_complex": pages_skipped_complex,
         "tables_found": len(tables),
