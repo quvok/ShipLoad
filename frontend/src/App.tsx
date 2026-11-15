@@ -173,6 +173,7 @@ type ExtractionReport = {
 
 type ExtractedCandidate = {
   field: string; value: number; unit: string; page: number; matched_text: string; status: string;
+  evidence?: { page: number; matched_text: string }[];
   candidate_index: number; review_status: string;
   decision: { reviewer_label: string; decided_at: string; comment: string | null; approved_value: number | null; revision_number: number | null } | null;
 };
@@ -315,7 +316,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
         <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
           <article className="report-section" key={key}>
-            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : "Не найдено в тексте"}</span></div>
+            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Требуется OCR" : "Не найдено в тексте"}</span></div>
             <p>{section.note}</p>
             {section.evidence.length > 0 && <ul>{section.evidence.slice(0, 5).map((item, index) =>
               <li key={index}><strong>Стр. {item.page}:</strong> {item.excerpt}</li>
@@ -341,10 +342,11 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       </div>}
       {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> : <>
         <label className="reviewer-label">Проверяющий (имя или должность)<input value={reviewerLabel} onChange={event => setReviewerLabel(event.target.value)} maxLength={80} placeholder="Например, старший помощник" /></label>
-        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат, м</th><th>Страница</th><th>Фрагмент источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Кандидат / подтверждено, м</th><th>Страницы</th><th>Фрагменты источника</th><th>Решение</th></tr></thead><tbody>{candidates.map(item => <tr key={item.candidate_index}>
           <td>{candidateLabels[item.field] ?? item.field}</td>
-          <td><input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} disabled={item.review_status !== "PENDING"} /></td>
-          <td>{item.page}</td><td>{item.matched_text}</td>
+          <td>{item.review_status === "PENDING" ? <input className="candidate-value" type="number" min="0.001" step="0.001" value={correctedValues[item.candidate_index] ?? String(item.value)} onChange={event => setCorrectedValues(current => ({ ...current, [item.candidate_index]: event.target.value }))} /> : <strong>{(item.decision?.approved_value ?? item.value).toFixed(3)}</strong>}</td>
+          <td>{(item.evidence?.length ? item.evidence : [{ page: item.page, matched_text: item.matched_text }]).map(source => source.page).filter((page, index, pages) => pages.indexOf(page) === index).join(", ")}</td>
+          <td>{(item.evidence?.length ? item.evidence : [{ page: item.page, matched_text: item.matched_text }]).map((source, index) => <div key={String(source.page) + "-" + index}><small>Стр. {source.page}:</small> {source.matched_text}</div>)}</td>
           <td>{item.review_status === "PENDING" ? <div className="candidate-actions">
             <button className="secondary-button" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "APPROVE")}>{reviewingCandidate === item.candidate_index ? "Сохранение…" : "Подтвердить"}</button>
             <button className="candidate-reject" disabled={reviewingCandidate !== null} onClick={() => void reviewCandidate(item, "REJECT")}>Отклонить</button>
