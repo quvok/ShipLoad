@@ -274,26 +274,36 @@ def reextract_source_document(
             detail=f"Не удалось повторно извлечь данные ({type(exc).__name__}: {exc}).",
         ) from exc
 
+    new_document_id = str(uuid.uuid4())
+    new_stored_filename = f"{new_document_id}.pdf"
+    new_storage_path = _DOCUMENT_STORAGE / new_stored_filename
     stem = Path(original.original_filename).stem
     reanalysis_name = f"{stem} (повторный анализ).pdf"[:255]
-    record = SourceDocumentRecord(
-        id=str(uuid.uuid4()),
-        vessel_id=original.vessel_id,
-        original_filename=reanalysis_name,
-        stored_filename=original.stored_filename,
-        media_type=original.media_type,
-        size_bytes=original.size_bytes,
-        sha256=original.sha256,
-        document_type=original.document_type,
-        extraction_status="TEXT_EXTRACTED" if any(text.strip() for _, text in pages) else "OCR_REQUIRED",
-        extracted_candidates=extract_principal_particulars(pages),
-    )
-    session.add(record)
     try:
+        # Keep each immutable document record backed by its own unique stored path.
+        # A hard link avoids duplicating large PDFs where the filesystem supports it.
+        try:
+            new_storage_path.hardlink_to(storage_path)
+        except OSError:
+            new_storage_path.write_bytes(storage_path.read_bytes())
+        record = SourceDocumentRecord(
+            id=new_document_id,
+            vessel_id=original.vessel_id,
+            original_filename=reanalysis_name,
+            stored_filename=new_stored_filename,
+            media_type=original.media_type,
+            size_bytes=original.size_bytes,
+            sha256=original.sha256,
+            document_type=original.document_type,
+            extraction_status="TEXT_EXTRACTED" if any(text.strip() for _, text in pages) else "OCR_REQUIRED",
+            extracted_candidates=extract_principal_particulars(pages),
+        )
+        session.add(record)
         session.commit()
         session.refresh(record)
     except Exception:
         session.rollback()
+        new_storage_path.unlink(missing_ok=True)
         raise
     summary = _document_summary(record)
     summary["reanalysis_of"] = original.id
