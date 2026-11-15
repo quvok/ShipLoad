@@ -288,20 +288,6 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       setError(cause instanceof Error ? cause.message : "Ошибка при проверке кандидата.");
     } finally { setReviewingCandidate(null); }
   }
-  async function reextractDocument() {
-    if (!selectedDocument) return;
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const response = await fetch(`${API}/documents/${encodeURIComponent(selectedDocument)}/reextract`, { method: "POST" });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось повторно извлечь данные.");
-      await loadDocuments(vesselId);
-      setSelectedDocument(body.id);
-      setMessage(body.message ?? "Создан новый результат извлечения.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Ошибка повторного извлечения.");
-    } finally { setBusy(false); }
-  }
   async function approveAllCandidates() {
     const pending = candidates.filter(item => item.review_status === "PENDING");
     if (!pending.length) return;
@@ -357,7 +343,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       {!vesselId ? <div className="empty-state">Сначала выберите судно.</div> : documents.length === 0 ? <div className="empty-state">Для выбранного судна документы ещё не загружены.</div> :
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Файл</th><th>Тип</th><th>Объём</th><th>Извлечение</th><th>Кандидаты</th></tr></thead><tbody>{documents.map(doc => <tr key={doc.id} onClick={() => setSelectedDocument(doc.id)} className={selectedDocument === doc.id ? "selected-row" : ""}><td><strong>{doc.original_filename}</strong><small>SHA-256: {doc.sha256.slice(0,16)}…</small></td><td>{documentTypes.find(([value]) => value === doc.document_type)?.[1] ?? doc.document_type}</td><td>{(doc.size_bytes / 1024).toFixed(1)} КБ</td><td>{doc.extraction_status}</td><td>{doc.candidate_count}</td></tr>)}</tbody></table></div>}
     </section>
-    {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2><a className="help-button" href={`${API}/documents/${encodeURIComponent(selected.id)}/file`} target="_blank" rel="noreferrer">Открыть оригинал ↗</a></div><div className="candidate-actions"><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span><button className="secondary-button" type="button" disabled={busy || apiState !== "online"} onClick={() => void reextractDocument()}>Повторно извлечь</button></div></div>
+    {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2><a className="help-button" href={`${API}/documents/${encodeURIComponent(selected.id)}/file`} target="_blank" rel="noreferrer">Открыть оригинал ↗</a></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
       {report && <div className="extraction-report">
         <div className="eyebrow">ПОЛНЫЙ ОБЗОР ДОКУМЕНТА</div>
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
