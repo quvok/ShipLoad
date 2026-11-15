@@ -44,7 +44,7 @@ class LoadingConditionRecord(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="REVIEW_REQUIRED")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     vessel: Mapped[VesselRecord] = relationship(back_populates="loading_conditions")
     items: Mapped[list["LoadingItemRecord"]] = relationship(
