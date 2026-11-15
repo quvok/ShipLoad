@@ -1,11 +1,18 @@
+import hashlib
+import re
+import uuid
+from pathlib import Path
 from typing import Annotated
+
+from fastapi import File, Form, UploadFile
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import LoadingConditionRecord, LoadingItemRecord, TankRecord, VesselRecord
+from app.models import LoadingConditionRecord, LoadingItemRecord, SourceDocumentRecord, TankRecord, VesselRecord
+from app.services.vessel_document_extractor import extract_principal_particulars
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
@@ -72,6 +79,139 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
     if record is None:
         raise HTTPException(status_code=404, detail="Судно не найдено")
     return record
+
+
+_DOCUMENT_STORAGE = Path(__file__).resolve().parents[1] / "data" / "documents"
+_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+_ALLOWED_DOCUMENT_TYPES = {"ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
+
+
+@app.post(
+    "/api/v1/vessels/{vessel_id}/documents",
+    status_code=status.HTTP_201_CREATED,
+    tags=["documents"],
+)
+async def upload_vessel_document(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    file: Annotated[UploadFile, File()],
+    document_type: Annotated[str, Form()] = "other",
+) -> dict[str, object]:
+    """Store an immutable PDF and extract traceable review candidates only."""
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    if document_type not in _ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(status_code=422, detail="Неизвестный тип документа")
+    original_name = Path(file.filename or "document.pdf").name[:255]
+    if Path(original_name).suffix.lower() != ".pdf":
+        raise HTTPException(status_code=415, detail="Пока поддерживаются только PDF-документы")
+    content = await file.read(_MAX_DOCUMENT_BYTES + 1)
+    if len(content) > _MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="Размер файла превышает 25 МБ")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=415, detail="Файл не прошёл проверку сигнатуры PDF")
+    digest = hashlib.sha256(content).hexdigest()
+    duplicate = session.scalar(
+        select(SourceDocumentRecord).where(
+            SourceDocumentRecord.vessel_id == vessel_id,
+            SourceDocumentRecord.sha256 == digest,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Этот файл уже загружен для данного судна")
+    from io import BytesIO
+    from pypdf import PdfReader
+
+    document_id = str(uuid.uuid4())
+    stored_name = f"{document_id}.pdf"
+    _DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
+    storage_path = _DOCUMENT_STORAGE / stored_name
+    try:
+        reader = PdfReader(BytesIO(content), strict=True)
+        pages = [(index + 1, page.extract_text() or "") for index, page in enumerate(reader.pages)]
+        if not pages:
+            raise ValueError("PDF не содержит страниц")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Не удалось прочитать PDF-документ") from exc
+
+    candidates = extract_principal_particulars(pages)
+    has_text = any(text.strip() for _, text in pages)
+    extraction_status = "TEXT_EXTRACTED" if has_text else "OCR_REQUIRED"
+    storage_path.write_bytes(content)
+    record = SourceDocumentRecord(
+        id=document_id,
+        vessel_id=vessel_id,
+        original_filename=original_name,
+        stored_filename=stored_name,
+        media_type="application/pdf",
+        size_bytes=len(content),
+        sha256=digest,
+        document_type=document_type,
+        extraction_status=extraction_status,
+        extracted_candidates=candidates,
+    )
+    try:
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+    except Exception:
+        session.rollback()
+        storage_path.unlink(missing_ok=True)
+        raise
+    return _document_summary(record)
+
+
+def _document_summary(record: SourceDocumentRecord) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "vessel_id": record.vessel_id,
+        "original_filename": record.original_filename,
+        "media_type": record.media_type,
+        "size_bytes": record.size_bytes,
+        "sha256": record.sha256,
+        "document_type": record.document_type,
+        "extraction_status": record.extraction_status,
+        "candidate_count": len(record.extracted_candidates),
+        "uploaded_at": record.uploaded_at.isoformat(),
+    }
+
+
+@app.get(
+    "/api/v1/vessels/{vessel_id}/documents",
+    tags=["documents"],
+)
+def list_vessel_documents(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> list[dict[str, object]]:
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    records = session.scalars(
+        select(SourceDocumentRecord)
+        .where(SourceDocumentRecord.vessel_id == vessel_id)
+        .order_by(SourceDocumentRecord.uploaded_at.desc())
+    ).all()
+    return [_document_summary(record) for record in records]
+
+
+@app.get(
+    "/api/v1/documents/{document_id}/candidates",
+    tags=["documents"],
+)
+def get_document_candidates(
+    document_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    record = session.get(SourceDocumentRecord, document_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    return {
+        "document_id": record.id,
+        "filename": record.original_filename,
+        "extraction_status": record.extraction_status,
+        "candidates": record.extracted_candidates,
+        "message": "Распознанные значения являются кандидатами и требуют сверки с оригиналом.",
+    }
 
 
 @app.post(
