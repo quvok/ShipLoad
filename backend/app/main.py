@@ -133,6 +133,7 @@ def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]
 
 _DOCUMENT_STORAGE = Path(__file__).resolve().parents[1] / "data" / "documents"
 _MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+_DOCUMENT_ANALYSIS_VERSION = 1
 _ALLOWED_DOCUMENT_TYPES = {"auto", "ship_particulars", "stability_booklet", "general_arrangement", "lines_plan", "other"}
 
 
@@ -321,13 +322,31 @@ def get_document_extraction_report(
     document_id: str,
     session: Annotated[Session, Depends(get_session)],
 ) -> dict[str, object]:
-    """Rebuild the full-document evidence inventory from the immutable PDF original."""
+    """Return the versioned report cache or build it once from the immutable PDF."""
     record = session.get(SourceDocumentRecord, document_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Документ не найден")
     storage_path = (_DOCUMENT_STORAGE / record.stored_filename).resolve()
     if storage_path.parent != _DOCUMENT_STORAGE.resolve() or not storage_path.is_file():
         raise HTTPException(status_code=404, detail="Оригинал документа недоступен")
+    document_id_value = record.id
+    filename = record.original_filename
+    sha256 = record.sha256
+    if (
+        record.analysis_version == _DOCUMENT_ANALYSIS_VERSION
+        and record.extraction_report is not None
+    ):
+        return {
+            "document_id": document_id_value,
+            "filename": filename,
+            "sha256": sha256,
+            "report": record.extraction_report,
+            "analysis_version": record.analysis_version,
+            "analysis_completed_at": (
+                record.analysis_completed_at.isoformat()
+                if record.analysis_completed_at else None
+            ),
+        }
     try:
         reader = PdfReader(str(storage_path), strict=False)
         if reader.is_encrypted:
@@ -348,6 +367,18 @@ def get_document_extraction_report(
         table_analysis = extract_pdf_tables(storage_path, pages)
         report["table_analysis"] = table_analysis
         report["dataset_coverage"] = build_dataset_coverage(report, table_analysis)
+        cached_at = None
+        if table_analysis.get("status") != "TABLE_EXTRACTION_FAILED":
+            cached_at = datetime.now(UTC)
+            record.analysis_version = _DOCUMENT_ANALYSIS_VERSION
+            record.extraction_report = report
+            record.analysis_completed_at = cached_at
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                cached_at = None
+                logger.exception("Could not cache extraction report for document %s", document_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -357,10 +388,12 @@ def get_document_extraction_report(
             detail=f"Не удалось повторно проанализировать PDF ({type(exc).__name__}: {exc}).",
         ) from exc
     return {
-        "document_id": record.id,
-        "filename": record.original_filename,
-        "sha256": record.sha256,
+        "document_id": document_id_value,
+        "filename": filename,
+        "sha256": sha256,
         "report": report,
+        "analysis_version": _DOCUMENT_ANALYSIS_VERSION if cached_at else None,
+        "analysis_completed_at": cached_at.isoformat() if cached_at else None,
     }
 
 

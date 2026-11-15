@@ -112,6 +112,9 @@ class SourceDocumentRecord(Base):
     document_type: Mapped[str] = mapped_column(String(40), nullable=False, default="other")
     extraction_status: Mapped[str] = mapped_column(String(40), nullable=False)
     extracted_candidates: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    analysis_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extraction_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
