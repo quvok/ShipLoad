@@ -24,3 +24,7 @@ def test_longitudinal_strength_table_uses_strength_headers():
 def test_stability_curve_table_uses_righting_arm_headers():
     sample = "Heel Angle GZ Curve Righting Lever KN"
     assert _classify_table(sample) == "stability"
+
+def test_deadweight_scale_with_tpc_and_mct_is_loading_condition():
+    sample = "DEADWEIGHT SCALE T.P.C M.T.C DRAFT DISPL. DEADWEIGHT"
+    assert _classify_table(sample) == "loading_condition"
