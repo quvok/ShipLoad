@@ -229,3 +229,56 @@ def test_candidate_review_rejects_blank_reviewer_label():
         json={"decision": "APPROVE", "reviewer_label": "   "},
     )
     assert response.status_code == 422
+
+def test_batch_candidate_approval_creates_one_immutable_revision():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Batch review vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/approve-batch",
+        json={
+            "reviewer_label": "Старший помощник",
+            "items": [
+                {"candidate_index": 0, "approved_value": 124.0},
+                {"candidate_index": 1, "approved_value": 112.0},
+            ],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["revision_number"] == 1
+    assert response.json()["approved_count"] == 2
+
+    revisions = client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json()
+    assert len(revisions) == 1
+    assert revisions[0]["values"]["loa_m"] == 124.0
+    assert revisions[0]["values"]["lbp_m"] == 112.0
+
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert [item["decision"]["revision_number"] for item in candidates] == [1, 1]
+
+
+def test_batch_candidate_approval_is_atomic_when_values_are_inconsistent():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Batch review vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = _seed_document_with_candidates(vessel_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/candidates/approve-batch",
+        json={
+            "reviewer_label": "Проверяющий",
+            "items": [
+                {"candidate_index": 0, "approved_value": 100.0},
+                {"candidate_index": 1, "approved_value": 111.0},
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json() == []
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert all(item["review_status"] == "PENDING" for item in candidates)
+
