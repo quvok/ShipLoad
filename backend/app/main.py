@@ -30,6 +30,7 @@ from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
 from app.services.pdf_table_extractor import extract_pdf_tables
+from app.services.dataset_coverage import build_dataset_coverage
 from app.services.vessel_document_extractor import (
     build_extraction_report,
     extract_principal_particulars,
@@ -323,7 +324,9 @@ def get_document_extraction_report(
         report = build_extraction_report(pages)
         # Table extraction is limited to pages whose text suggests technical tables.
         # It does not approve or normalize any cell values.
-        report["table_analysis"] = extract_pdf_tables(storage_path, pages)
+        table_analysis = extract_pdf_tables(storage_path, pages)
+        report["table_analysis"] = table_analysis
+        report["dataset_coverage"] = build_dataset_coverage(report, table_analysis)
     except HTTPException:
         raise
     except Exception as exc:
