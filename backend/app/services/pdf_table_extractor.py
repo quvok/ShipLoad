@@ -15,7 +15,7 @@ _PAGE_HINTS = re.compile(
     re.IGNORECASE,
 )
 _KIND_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("hydrostatics", re.compile(r"LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.I)),
+    ("hydrostatics", re.compile(r"L\\.?\\s*C\\.?\\s*[BF]\\.?|LCB|LCF|TPC|MCT|hydrostatic|displacement|KM|KB", re.I)),
     ("tank_capacity", re.compile(r"tank|sounding|ullage|capacity", re.I)),
     ("stability", re.compile(r"GZ|righting lever|stability|free surface|FSM|KG|GM", re.I)),
     ("strength", re.compile(r"shear force|bending moment|still water|strength", re.I)),
@@ -61,6 +61,7 @@ def extract_pdf_tables(
     tables: list[dict[str, object]] = []
     page_errors: list[dict[str, object]] = []
     pages_skipped_complex: list[int] = []
+    pages_checked: list[int] = []
 
     try:
         with pdfplumber.open(str(pdf_path), laparams=None) as pdf:
@@ -76,6 +77,7 @@ def extract_pdf_tables(
                 if stream_size > max_page_stream_bytes:
                     pages_skipped_complex.append(page_number)
                     continue
+                pages_checked.append(page_number)
                 try:
                     found = page.extract_tables({
                         "vertical_strategy": "lines",
