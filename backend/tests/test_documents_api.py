@@ -2,36 +2,9 @@
 
 from io import BytesIO
 
-from fastapi.testclient import TestClient
 from pypdf import PdfWriter
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.db import get_session
-from app.main import app
-from app.models import Base
-
-
-engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base.metadata.create_all(engine)
-
-
-def override_session():
-    session = TestingSession()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-app.dependency_overrides[get_session] = override_session
-client = TestClient(app)
+from test_vessels_api import Base, client, engine, vessel_payload
 
 
 def setup_function():
