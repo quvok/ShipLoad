@@ -29,7 +29,10 @@ from app.models import (
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
-from app.services.vessel_document_extractor import (\n    build_extraction_report,\n    extract_principal_particulars,\n)
+from app.services.vessel_document_extractor import (
+    build_extraction_report,
+    extract_principal_particulars,
+)
 
 logger = logging.getLogger(__name__)
 
