@@ -9,7 +9,7 @@ import pdfplumber
 
 
 _PAGE_HINTS = re.compile(
-    r"hydrostatic|L\\.?\\s*C\\.?\\s*[BF]\\.?|LCB|LCF|TPC|MCT|KM\s*[=:]|tank|sounding|ullage|capacity|"
+    r"hydrostatic|L\.?\s*C\.?\s*[BF]\.?|LCB|LCF|TPC|MCT|KM\s*[=:]|tank|sounding|ullage|capacity|"
     r"displacement|deadweight|GZ|righting lever|shear force|bending moment|"
     r"stability criteria|draft",
     re.IGNORECASE,
