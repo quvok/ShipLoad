@@ -16,7 +16,8 @@ _PAGE_HINTS = re.compile(
 )
 _KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "tank_capacity": (
-        re.compile(r"cargo tank|ballast tank|fuel tank|tank capacity|sounding|ullage|calibration", re.IGNORECASE),
+        re.compile(r"cargo tank|ballast tank|fuel tank|tank capacity|capacity plan", re.IGNORECASE),
+        re.compile(r"sounding|ullage|calibration", re.IGNORECASE),
     ),
     "strength": (
         re.compile(r"shear force|bending moment|still water|longitudinal strength", re.IGNORECASE),
@@ -25,10 +26,12 @@ _KIND_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"GZ curve|righting lever|heel angle|stability criteria|free surface moment|cross curve", re.IGNORECASE),
     ),
     "hydrostatics": (
-        re.compile(r"L\.?\s*C\.?\s*[BF]\.?|\bLCB\b|\bLCF\b|\bTPC\b|\bMCT\b|hydrostatic|waterplane|\bKM\b|\bKB\b", re.IGNORECASE),
+        re.compile(r"hydrostatic|waterplane", re.IGNORECASE),
+        re.compile(r"L\.?\s*C\.?\s*[BF]\.?|\bLCB\b|\bLCF\b|\bTPC\b|\bMCT\b|\bKM\b|\bKB\b", re.IGNORECASE),
     ),
     "loading_condition": (
-        re.compile(r"loading condition|deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
+        re.compile(r"deadweight scale|loading condition|loading manual", re.IGNORECASE),
+        re.compile(r"deadweight|displacement|draft|trim|freeboard", re.IGNORECASE),
     ),
 }
 _LABELS = {
@@ -44,7 +47,7 @@ _LABELS = {
 def _classify_table(sample: str) -> str:
     """Classify by distinctive table content; generic displacement is not hydrostatics."""
     scores = {
-        kind: sum(3 if index == 0 else 1 for index, pattern in enumerate(patterns) if pattern.search(sample))
+        kind: sum(4 if index == 0 else 2 for index, pattern in enumerate(patterns) if pattern.search(sample))
         for kind, patterns in _KIND_PATTERNS.items()
     }
     best_kind = max(scores, key=scores.get)
