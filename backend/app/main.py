@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -198,6 +199,28 @@ def list_vessel_documents(
         .order_by(SourceDocumentRecord.uploaded_at.desc())
     ).all()
     return [_document_summary(record) for record in records]
+
+
+@app.get(
+    "/api/v1/documents/{document_id}/file",
+    tags=["documents"],
+)
+def download_source_document(
+    document_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> FileResponse:
+    record = session.get(SourceDocumentRecord, document_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    storage_path = (_DOCUMENT_STORAGE / record.stored_filename).resolve()
+    if storage_path.parent != _DOCUMENT_STORAGE.resolve() or not storage_path.is_file():
+        raise HTTPException(status_code=404, detail="Оригинал документа недоступен")
+    return FileResponse(
+        storage_path,
+        media_type=record.media_type,
+        filename=record.original_filename,
+        content_disposition_type="inline",
+    )
 
 
 @app.get(
