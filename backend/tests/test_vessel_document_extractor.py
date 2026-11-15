@@ -105,3 +105,17 @@ def test_identical_principal_particulars_are_deduplicated_with_all_source_pages(
     assert by_field["lbp_m"]["value"] == 283.1
     assert [source["page"] for source in by_field["lbp_m"]["evidence"]] == [2, 139, 140]
     assert [source["page"] for source in by_field["moulded_breadth_m"]["evidence"]] == [2, 8]
+
+def test_extracts_breadth_and_depth_from_common_particulars_table_labels():
+    pages = [
+        (8, "BREADTH 50.0 m\nDEPTH 26.5 m"),
+        (159, "Breadth mld 50.000 m\nDepth mld 26.500 m"),
+    ]
+    result = extract_principal_particulars(pages)
+    by_field = {item["field"]: item for item in result}
+
+    assert len(result) == 2
+    assert by_field["moulded_breadth_m"]["value"] == 50.0
+    assert by_field["moulded_depth_m"]["value"] == 26.5
+    assert [source["page"] for source in by_field["moulded_breadth_m"]["evidence"]] == [8, 159]
+    assert [source["page"] for source in by_field["moulded_depth_m"]["evidence"]] == [8, 159]
