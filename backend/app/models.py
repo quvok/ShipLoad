@@ -1,8 +1,8 @@
 """SQLAlchemy persistence models."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, JSON, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -24,7 +24,7 @@ class VesselRecord(Base):
     data_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     loading_conditions: Mapped[list["LoadingConditionRecord"]] = relationship(
         back_populates="vessel", cascade="all, delete-orphan"
