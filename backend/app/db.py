@@ -1,6 +1,6 @@
 """Database configuration with a persistent local SQLite default."""
-from collections.abc import Generator
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 from dotenv import load_dotenv
