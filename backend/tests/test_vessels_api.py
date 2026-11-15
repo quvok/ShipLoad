@@ -75,3 +75,66 @@ def test_get_vessel_by_id():
 def test_missing_vessel_returns_404():
     response = client.get("/api/v1/vessels/not-a-vessel")
     assert response.status_code == 404
+
+
+def loading_condition_payload(vessel_id):
+    return {
+        "vessel_id": vessel_id,
+        "name": "Тестовое загрузочное условие",
+        "vessel_data_revision": "DRAFT-REV-001",
+        "notes": "Только проверка сохранения исходных данных.",
+        "items": [
+            {
+                "item_id": "cargo-001",
+                "description": "Тестовая партия груза",
+                "kind": "cargo",
+                "mass_kg": 12500,
+                "position": {
+                    "x_m": 15.0,
+                    "y_m": 0.0,
+                    "z_m": 2.5,
+                    "position_source": "Тестовая ссылка на план размещения",
+                },
+                "source_reference": "Тестовый грузовой план, лист 1",
+            }
+        ],
+    }
+
+
+def test_create_and_retrieve_loading_condition():
+    vessel_response = client.post("/api/v1/vessels", json=vessel_payload())
+    assert vessel_response.status_code == 201
+    vessel_id = vessel_response.json()["id"]
+
+    created_response = client.post(
+        "/api/v1/loading-conditions",
+        json=loading_condition_payload(vessel_id),
+    )
+    assert created_response.status_code == 201
+    created = created_response.json()
+    assert created["status"] == "REVIEW_REQUIRED"
+    assert created["item_count"] == 1
+    assert "Расчёт водоизмещения" in created["message"]
+
+    listed = client.get(f"/api/v1/vessels/{vessel_id}/loading-conditions")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["id"] == created["id"]
+
+    detail = client.get(f"/api/v1/loading-conditions/{created['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["items"][0]["mass_kg"] == 12500
+    assert detail.json()["items"][0]["source_reference"] == "Тестовый грузовой план, лист 1"
+
+
+def test_create_loading_condition_rejects_unknown_vessel():
+    response = client.post(
+        "/api/v1/loading-conditions",
+        json=loading_condition_payload("missing-vessel"),
+    )
+    assert response.status_code == 404
+
+
+def test_get_missing_loading_condition_returns_404():
+    response = client.get("/api/v1/loading-conditions/missing-condition")
+    assert response.status_code == 404
