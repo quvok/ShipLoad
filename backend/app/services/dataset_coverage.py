@@ -140,12 +140,7 @@ def build_dataset_coverage(
             status = "TABLE_EVIDENCE_REVIEW_REQUIRED"
         elif text_evidence:
             status = "TEXT_EVIDENCE_REVIEW_REQUIRED"
-        elif (
-            table_report.get("status") == "TABLE_EXTRACTION_FAILED"
-            or table_report.get("pages_skipped_complex")
-            or table_report.get("pages_skipped_by_limit")
-            or table_report.get("page_errors")
-        ):
+        elif table_report.get("status") == "TABLE_EXTRACTION_FAILED":
             status = "EXTRACTION_INCOMPLETE"
         else:
             status = "NO_EVIDENCE_FOUND_NOT_PROVEN_ABSENT"
@@ -171,14 +166,40 @@ def build_dataset_coverage(
             ),
         })
 
+    limitations = [
+        "Табличные фрагменты не являются нормализованными или утверждёнными данными.",
+        "Наличие фрагмента не подтверждает полноту таблицы или корректность её классификации.",
+        "Отсутствие совпадений не доказывает отсутствие данных в исходном PDF.",
+        "OCR, распознавание графиков и геометрии схем этим этапом не выполняются.",
+    ]
+    skipped_complex = table_report.get("pages_skipped_complex", [])
+    if skipped_complex:
+        limitations.append(
+            "Структурный разбор сложных векторных страниц пропущен: "
+            f"{', '.join(map(str, skipped_complex))}. Это ограничение не означает, "
+            "что остальные наборы данных извлечены не полностью."
+        )
+    skipped_by_limit = table_report.get("pages_skipped_by_limit", [])
+    if skipped_by_limit:
+        limitations.append(
+            "Страницы за лимитом табличного разбора: "
+            f"{', '.join(map(str, skipped_by_limit))}."
+        )
+    page_errors = table_report.get("page_errors", [])
+    if page_errors and table_report.get("status") != "TABLE_EXTRACTION_FAILED":
+        error_pages = sorted({
+            str(item.get("page")) for item in page_errors
+            if isinstance(item, Mapping) and item.get("page") is not None
+        })
+        page_label = ", ".join(error_pages) if error_pages else "не определены"
+        limitations.append(
+            f"Не удалось обработать отдельные страницы ({page_label}); "
+            "это не доказывает отсутствие или неполноту конкретного набора данных."
+        )
+
     return {
         "coverage_version": 1,
         "status": "REVIEW_REQUIRED",
         "datasets": datasets,
-        "limitations": [
-            "Табличные фрагменты не являются нормализованными или утверждёнными данными.",
-            "Наличие фрагмента не подтверждает полноту таблицы или корректность её классификации.",
-            "Отсутствие совпадения не доказывает отсутствие данных в исходном PDF.",
-            "OCR, распознавание графиков и геометрии схем этим этапом не выполняются.",
-        ],
+        "limitations": limitations,
     }
