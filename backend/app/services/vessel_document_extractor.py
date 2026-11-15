@@ -60,7 +60,7 @@ _REPORT_SECTIONS: dict[str, tuple[str, ...]] = {
     "principal_particulars": (
         "LOA", "LBP", "length overall", "length between perpendiculars",
         "breadth (molded)", "breadth (moulded)", "moulded breadth",
-        "moulded depth", "deadweight", "DWT", "displacement", "lightship",
+        "moulded depth", "molded depth", "deadweight", "DWT", "displacement", "lightship",
     ),
     "coordinate_system": (
         "aft perpendicular", "forward perpendicular", "from AP",
@@ -76,7 +76,7 @@ _REPORT_SECTIONS: dict[str, tuple[str, ...]] = {
     ),
     "hydrostatics": (
         "hydrostatic", "displacement table", "TPC", "MCT", "LCB",
-        "LCF", "KB", "waterplane", "hydrostatic particulars",
+        "LCF", "L.C.F", "L.C.B", "KB", "waterplane", "hydrostatic particulars",
     ),
     "stability_data": (
         "stability criteria", "intact stability", "GZ curve", "righting lever",
