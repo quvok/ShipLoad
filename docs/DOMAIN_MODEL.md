@@ -13,7 +13,9 @@ Candidate field/table value, raw text, normalized candidate, unit, document/page
 A versioned snapshot containing accepted lightship particulars, hydrostatic data, tank data, capacity/geometry data, operating limits and applicable criteria. Each record links to its source and reviewer.
 
 ## Tank
-Tank identity, type, capacity, geometry/table reference, permeability where applicable, sounding/ullage conventions, liquid density assumptions and longitudinal/transverse/vertical reference definitions.
+The initial registry stores only vessel-scoped identity, code, name, type, arrangement-plan source and (optionally) a sourced nominal capacity. Tank codes are unique within a vessel. A liquid loading item must reference a registered tank belonging to the same vessel, and its liquid kind must match the registered tank type.
+
+This registry is not a tank calibration model. Sounding/ullage-to-volume tables, correction tables, LCG/TCG/VCG or moment columns, calibration revision, units, reference datums, interpolation rules, density sources and free-surface data must be represented and reviewed as separate sourced records before any tank quantity or moment can be calculated. Never infer tank geometry or centres from nominal capacity.
 
 ## LoadingCondition
 Named condition and timestamp. Contains lightship reference plus individually identified weights: cargo, ballast, fuel, diesel, fresh water, lubricants, stores, crew/passengers and other variable weights. Each item records mass, position or approved tank/table reference, density where relevant and source.
