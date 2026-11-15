@@ -62,6 +62,17 @@ app.add_middleware(
 )
 
 
+@app.get("/", tags=["system"])
+def root() -> dict[str, str]:
+    """Expose the service entry points instead of FastAPI's default 404."""
+    return {
+        "service": "shipload-api",
+        "health": "/health",
+        "status": "/api/v1/status",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health", tags=["system"])
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "shipload-api"}
