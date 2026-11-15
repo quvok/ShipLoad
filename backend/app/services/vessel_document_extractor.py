@@ -116,11 +116,11 @@ def _is_relevant_match(term: str, line: str) -> bool:
     """Filter ambiguous abbreviations unless their technical context is explicit."""
     lowered = line.casefold()
     if term.casefold() == "km":
-        return bool(re.search(r"\bKM\s*(?:=|:)?\s*\d", line, re.I)) or (
-            "hydrostatic" in lowered and bool(re.search(r"\bKM\b", line, re.I))
+        return bool(re.search(r"\bKM\s*(?:=|:)?\s*\d", line, re.IGNORECASE)) or (
+            "hydrostatic" in lowered and bool(re.search(r"\bKM\b", line, re.IGNORECASE))
         )
     if term.casefold() in {"tpc", "mct", "lcb", "lcf", "kb", "fsm", "kg", "gm"}:
-        return bool(re.search(r"\b" + re.escape(term) + r"\b", line, re.I))
+        return bool(re.search(r"\b" + re.escape(term) + r"\b", line, re.IGNORECASE))
     return True
 
 
