@@ -16,43 +16,67 @@ Browser-based vessel loading, draft, trim and stability workspace.
 ## Architecture
 
 - `frontend/`: React + TypeScript + Vite browser application.
-- `backend/`: Python + FastAPI API and calculation services.
+- `backend/`: Python + FastAPI API, SQLAlchemy persistence and calculation services.
+- `backend/migrations/`: Alembic database migrations.
 - `docs/`: architecture, domain model, validation and safety requirements.
-- Planned persistence: PostgreSQL; planned object storage for original documents and generated reports.
+- PostgreSQL stores structured vessel data; original documents and reports will use separate object storage.
 
 The calculation engine is deliberately separated from document parsing and the user interface. OCR/LLM extraction may propose data, but it must never silently become authoritative calculation input.
 
 ## Current implementation
 
-- Initial responsive web workspace dashboard.
+- Russian-language responsive web workspace dashboard.
 - FastAPI health and development-status endpoints.
+- PostgreSQL-ready vessel registry API: create, list and retrieve vessel profiles.
+- SQLAlchemy model and Alembic initial migration for the vessel registry.
+- Explicit database configuration; vessel API returns HTTP 503 when `DATABASE_URL` is not configured. It does not silently use an in-memory database.
+- New vessel profiles are marked `DRAFT`; this is not an approval of technical particulars.
 - Guarded linear table interpolation primitive that rejects extrapolation and malformed tables.
-- Backend tests for API status and interpolation boundaries.
+- Structural loading-condition input validation; it performs no naval calculations.
+- Backend tests for API status, interpolation boundaries, loading schemas and vessel registry behavior.
 - GitHub Actions workflow for backend lint/tests and frontend production build.
 
-Not implemented yet: vessel persistence, authentication, document upload/extraction, reviewed hydrostatic/tank data, loading-condition management, vessel-specific stability calculations, criteria evaluation and report generation. No vessel-specific data or validated operational calculation is included.
+Not implemented yet: authentication, document upload/extraction, reviewed hydrostatic/tank data, loading-condition persistence, vessel-specific stability calculations, criteria evaluation and report generation. No vessel-specific data or validated operational calculation is included.
 
 ## Local development
 
 ### Backend
 
-Requires Python 3.12+.
+Requires Python 3.12+ and PostgreSQL.
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+cp .env.example .env
+```
+
+Set `DATABASE_URL` in the environment (or load it from your local environment manager), for example:
+
+```text
+postgresql+psycopg://shipload:change-me@localhost:5432/shipload
+```
+
+Create the database, then apply migrations:
+
+```bash
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 API health: `http://127.0.0.1:8000/health`
 
+Vessel API:
+- `POST /api/v1/vessels` — create a draft vessel profile.
+- `GET /api/v1/vessels` — list vessel profiles.
+- `GET /api/v1/vessels/{vessel_id}` — retrieve a vessel profile.
+
 Run tests and lint:
 
 ```bash
 pytest -q
-ruff check app tests
+ruff check app tests migrations
 ```
 
 ### Frontend
