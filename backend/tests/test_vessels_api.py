@@ -127,6 +127,33 @@ def test_create_and_retrieve_loading_condition():
     assert detail.json()["items"][0]["source_reference"] == "Тестовый грузовой план, лист 1"
 
 
+def test_create_loading_condition_persists_multiple_items():
+    vessel_id = client.post("/api/v1/vessels", json=vessel_payload()).json()["id"]
+    payload = loading_condition_payload(vessel_id)
+    second = dict(payload["items"][0])
+    second["item_id"] = "stores-001"
+    second["description"] = "Судовые запасы"
+    second["mass_kg"] = 850
+    second["position"] = {
+        "x_m": -8.0,
+        "y_m": 1.2,
+        "z_m": 4.0,
+        "position_source": "Складская ведомость и план размещения",
+    }
+    second["source_reference"] = "Ведомость судовых запасов, лист 2"
+    payload["items"].append(second)
+
+    response = client.post("/api/v1/loading-conditions", json=payload)
+    assert response.status_code == 201
+    assert response.json()["item_count"] == 2
+
+    detail = client.get(f"/api/v1/loading-conditions/{response.json()['id']}")
+    assert detail.status_code == 200
+    assert {item["item_id"] for item in detail.json()["items"]} == {
+        "cargo-001", "stores-001"
+    }
+
+
 def test_create_loading_condition_rejects_unknown_vessel():
     response = client.post(
         "/api/v1/loading-conditions",
