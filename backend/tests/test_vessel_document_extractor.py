@@ -94,7 +94,7 @@ def test_table_page_hint_accepts_dotted_lcf_lcb_labels():
 def test_identical_principal_particulars_are_deduplicated_with_all_source_pages():
     pages = [
         (2, "Length Between Perpendiculars: 283.100 m; Breadth (Molded): 50.000 m"),
-        (8, "BREADTH 50.0 m"),
+        (8, "Breadth (Molded) 50.0 m"),
         (139, "LBP = 283.10 m"),
         (140, "LBP = 283.10 m"),
     ]
