@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.vessel import AxisDirection, CoordinateConvention, VesselCreate, VesselType
+from app.schemas.vessel import AxisDirection, VesselCreate, VesselType
 
 
 def valid_vessel() -> dict:
