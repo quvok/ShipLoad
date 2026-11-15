@@ -111,8 +111,8 @@ def test_hydrostatic_interpolation_rejects_extrapolation():
 def test_non_positive_corrected_gm_is_rejected():
     lightship = Lightship(1000.0, 50.0, 0.0, 20.0, 0.0)
     hydro = [
-        HydrostaticPoint(100.0, 5.0, 40.0, 50.0, 15.0, 100.0),
-        HydrostaticPoint(200.0, 6.0, 40.0, 50.0, 15.0, 100.0),
+        HydrostaticPoint(1000.0, 5.0, 40.0, 50.0, 15.0, 100.0),
+        HydrostaticPoint(2000.0, 6.0, 40.0, 50.0, 15.0, 100.0),
     ]
     with pytest.raises(CalculationInputError, match="non-positive"):
         calculate_loading_condition(
