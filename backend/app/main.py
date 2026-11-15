@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,7 +42,7 @@ def status_endpoint() -> dict[str, str]:
 )
 def create_vessel(
     vessel: VesselCreate,
-    session: Session = Depends(get_session),
+    session: Annotated[Session, Depends(get_session)],
 ) -> VesselRecord:
     record = VesselRecord(
         name=vessel.name,
