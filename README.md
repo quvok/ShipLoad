@@ -1,78 +1,67 @@
 # ShipLoad
 
-Browser-based vessel loading, draft, trim and stability workspace.
+Браузерное приложение для работы с загрузкой, осадкой, дифферентом и остойчивостью судов.
 
-> **Safety status: development only.** ShipLoad is not an approved loading instrument and must not be used to authorize loading, sailing, ballast operations or other safety-critical decisions. Results require independent verification against the vessel's approved stability information and applicable onboard procedures.
+> **Статус безопасности: разработка.** ShipLoad не является одобренным судовым загрузочным прибором и не должен использоваться для разрешения погрузки, выхода в море, балластных операций или других решений, влияющих на безопасность. Результаты требуют независимой проверки по одобренной документации конкретного судна и действующим судовым процедурам.
 
-## Project goals
+## Цели проекта
 
-- Maintain a separate, versioned technical profile for each vessel.
-- Import vessel documents and extract candidate data with traceable source references.
-- Require human review of extracted particulars, tables, units and limits.
-- Build reproducible loading conditions from lightship, deadweight items, tanks and cargo.
-- Calculate displacement, centres of gravity, draft/trim, free-surface effects and stability outputs using vessel-specific approved data.
-- Preserve calculation inputs, software version, data provenance and validation status in every report.
+- Отдельный версионируемый технический профиль каждого судна.
+- Загрузка судовых документов и извлечение предварительных данных со ссылками на источники.
+- Обязательная проверка человеком извлечённых характеристик, таблиц, единиц и диапазонов.
+- Формирование загрузочных состояний из lightship, грузов, танков и запасов.
+- Расчёт водоизмещения, центров тяжести, осадки, дифферента, влияния свободных поверхностей и показателей остойчивости по проверенным данным конкретного судна.
+- Воспроизводимость расчётов: сохранение входных данных, версии ПО, происхождения данных и статуса проверки.
 
-## Architecture
+## Архитектура
 
-- `frontend/`: React + TypeScript + Vite browser application.
-- `backend/`: Python + FastAPI API, SQLAlchemy persistence and calculation services.
-- `backend/migrations/`: Alembic database migrations.
-- `docs/`: architecture, domain model, validation and safety requirements.
-- PostgreSQL stores structured vessel data; original documents and reports will use separate object storage.
+- `frontend/`: React + TypeScript + Vite, браузерный интерфейс на русском языке.
+- `backend/`: Python + FastAPI, SQLAlchemy и расчётные сервисы.
+- `backend/migrations/`: миграции Alembic.
+- `docs/`: архитектура, модель предметной области, требования безопасности и валидации.
+- Локальная база SQLite хранит структурированные данные. Оригиналы документов и отчёты будут храниться отдельно.
 
-The calculation engine is deliberately separated from document parsing and the user interface. OCR/LLM extraction may propose data, but it must never silently become authoritative calculation input.
+Разбор документов отделён от расчётного ядра. OCR/LLM могут предлагать значения, но не могут незаметно превращать их в утверждённые исходные данные.
 
-## Current implementation
+## Текущая реализация
 
-- Russian-language responsive web workspace dashboard.
-- FastAPI health and development-status endpoints.
-- PostgreSQL-ready vessel registry API: create, list and retrieve vessel profiles.
-- SQLAlchemy model and Alembic initial migration for the vessel registry.
-- Explicit database configuration; vessel API returns HTTP 503 when `DATABASE_URL` is not configured. It does not silently use an in-memory database.
-- New vessel profiles are marked `DRAFT`; this is not an approval of technical particulars.
-- Guarded linear table interpolation primitive that rejects extrapolation and malformed tables.
-- Structural loading-condition input validation; it performs no naval calculations.
-- Backend tests for API status, interpolation boundaries, loading schemas and vessel registry behavior.
-- GitHub Actions workflow for backend lint/tests and frontend production build.
+- Русскоязычный адаптивный интерфейс рабочего пространства.
+- FastAPI: health/status endpoints.
+- API реестра судов: создание, список и получение профиля.
+- SQLAlchemy-модель и Alembic-миграция таблицы судов.
+- По умолчанию используется постоянная локальная SQLite-база: `backend/data/shipload.db`.
+- Путь к базе можно переопределить через `DATABASE_URL`; это оставляет возможность перейти на PostgreSQL.
+- Новые профили судов имеют статус `DRAFT`; это не означает утверждение технических характеристик.
+- Защищённая линейная интерполяция таблиц: запрещена экстраполяция и отклоняются некорректные таблицы.
+- Структурная проверка загрузочного состояния; морские расчёты пока не выполняются.
 
-Not implemented yet: authentication, document upload/extraction, reviewed hydrostatic/tank data, loading-condition persistence, vessel-specific stability calculations, criteria evaluation and report generation. No vessel-specific data or validated operational calculation is included.
+Пока не реализованы: аутентификация, загрузка и распознавание документов, проверенные гидростатические и танковые таблицы, сохранение загрузочных состояний, расчёты остойчивости конкретного судна, проверка критериев и формирование отчётов. В проекте нет утверждённых данных реального судна и валидированных эксплуатационных расчётов.
 
-## Local development
+## Локальный запуск
+
+Требуются Python 3.12+ и Node.js 22+.
 
 ### Backend
-
-Requires Python 3.12+ and PostgreSQL.
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
-cp .env.example .env
-```
-
-Set `DATABASE_URL` in the environment (or load it from your local environment manager), for example:
-
-```text
-postgresql+psycopg://shipload:change-me@localhost:5432/shipload
-```
-
-Create the database, then apply migrations:
-
-```bash
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-API health: `http://127.0.0.1:8000/health`
+По умолчанию база создаётся в `backend/data/shipload.db`. Переменную `DATABASE_URL` задавать не требуется.
 
-Vessel API:
-- `POST /api/v1/vessels` — create a draft vessel profile.
-- `GET /api/v1/vessels` — list vessel profiles.
-- `GET /api/v1/vessels/{vessel_id}` — retrieve a vessel profile.
+Проверка API: `http://127.0.0.1:8000/health`
 
-Run tests and lint:
+API судов:
+- `POST /api/v1/vessels` — создать профиль судна со статусом DRAFT.
+- `GET /api/v1/vessels` — список судов.
+- `GET /api/v1/vessels/{vessel_id}` — получить профиль судна.
+
+Проверки:
 
 ```bash
 pytest -q
@@ -81,27 +70,25 @@ ruff check app tests migrations
 
 ### Frontend
 
-Requires Node.js 22+.
-
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-The Vite development server starts at `http://localhost:5173`.
+Vite запускается по адресу `http://localhost:5173`.
 
-## Development principles
+## Принципы разработки
 
-1. SI units internally; conversions only at input/output boundaries.
-2. Every value carries a unit, source and review state where applicable.
-3. No extrapolation beyond approved table ranges without an explicit, validated method.
-4. Missing or inconsistent inputs produce a blocked/incomplete result, not a plausible-looking number.
-5. All calculations are deterministic and covered by tests using independently verified reference cases.
-6. Regulatory criteria and applicability must be explicitly configured for the vessel; no universal pass/fail shortcut.
-7. Reports distinguish calculated, imported, assumed and user-entered values.
-8. A passing software test is not evidence that a vessel is safe or that the application is approved.
+1. Внутренние единицы — SI; преобразования только на границах ввода/вывода.
+2. Каждое значение должно иметь единицу измерения, источник и статус проверки.
+3. Нельзя экстраполировать за пределы утверждённых таблиц без отдельного валидированного метода.
+4. Отсутствующие, противоречивые или выходящие за диапазон данные блокируют расчёт.
+5. Расчёты должны быть детерминированными и проверяться на независимых эталонных примерах.
+6. Критерии нормативной оценки настраиваются под конкретное судно; универсальный pass/fail не допускается.
+7. В отчётах различаются рассчитанные, импортированные, предположительные и введённые пользователем значения.
+8. Успешные программные тесты не доказывают безопасность судна или одобрение приложения.
 
-## Safety and validation
+## Безопасность и валидация
 
-Read [Safety and Validation](docs/SAFETY_AND_VALIDATION.md) before implementing or interpreting calculation outputs. Operational use requires independent engineering verification and any applicable flag, class and company approval.
+Перед реализацией расчётных функций необходимо изучить [SAFETY_AND_VALIDATION](docs/SAFETY_AND_VALIDATION.md). Эксплуатационное применение потребует независимой инженерной проверки и применимых одобрений флага, классификационного общества и компании.
