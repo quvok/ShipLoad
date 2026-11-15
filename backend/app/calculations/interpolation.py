@@ -5,6 +5,7 @@ extrapolate because approved vessel tables define the supported calculation rang
 """
 from bisect import bisect_left
 from collections.abc import Sequence
+import math
 
 
 class TableRangeError(ValueError):
@@ -52,4 +53,4 @@ def linear_interpolate(
 
 
 def _is_finite(value: float) -> bool:
-    return value == value and value not in (float("inf"), float("-inf"))
+    return math.isfinite(value)
