@@ -162,6 +162,16 @@ type ExtractionReport = {
     note: string;
   }>;
   limitations: string[];
+  dataset_coverage?: {
+    coverage_version: number;
+    status: string;
+    datasets: {
+      key: string; label: string; status: string; evidence_pages: number[];
+      text_evidence_count: number; table_evidence_count: number;
+      review_required: boolean; note: string;
+    }[];
+    limitations: string[];
+  };
   table_analysis?: {
     status: string; candidate_pages: number[]; pages_checked: number[];
     pages_skipped_by_limit: number[]; pages_skipped_complex: number[]; tables_found: number;
@@ -347,6 +357,22 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       {report && <div className="extraction-report">
         <div className="eyebrow">ПОЛНЫЙ ОБЗОР ДОКУМЕНТА</div>
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
+        {report.dataset_coverage && <section className="table-analysis">
+          <div className="report-section-heading"><strong>Покрытие наборов данных судна</strong><span className="draft-tag">Требует проверки</span></div>
+          <p>Сводка объединяет текстовые указатели и классифицированные табличные фрагменты. Наличие источника не означает, что таблица полностью распознана или подтверждена.</p>
+          <div className="report-section-grid">{report.dataset_coverage.datasets.map(dataset =>
+            <article className="report-section" key={dataset.key}>
+              <div className="report-section-heading"><strong>{dataset.label}</strong><span className="draft-tag">
+                {dataset.status === "TABLE_EVIDENCE_REVIEW_REQUIRED" ? "Есть таблица" :
+                  dataset.status === "TEXT_EVIDENCE_REVIEW_REQUIRED" ? "Есть текст" :
+                  dataset.status === "EXTRACTION_INCOMPLETE" ? "Извлечение неполное" : "Нет совпадений"}
+              </span></div>
+              <p>{dataset.note}</p>
+              <p className="form-hint">Страницы: {dataset.evidence_pages.length ? dataset.evidence_pages.join(", ") : "не определены"} · текстовых указателей: {dataset.text_evidence_count} · таблиц: {dataset.table_evidence_count}</p>
+            </article>
+          )}</div>
+          <div className="form-hint"><strong>Ограничения покрытия:</strong><ul>{report.dataset_coverage.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>
+        </section>}
         <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
           <article className="report-section" key={key}>
             <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Требуется OCR" : "Не найдено в тексте"}</span></div>
