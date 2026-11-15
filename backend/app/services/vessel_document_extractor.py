@@ -18,23 +18,23 @@ class ExtractedCandidate:
 # Deliberately require an explicit metre unit. Bare numbers are too ambiguous.
 _PATTERNS: dict[str, re.Pattern[str]] = {
     "loa_m": re.compile(
-        r"\\b(?:LOA|L\\.?O\\.?A\\.?|length\\s+overall)\\b[^\\d\\n]{0,50}"
-        r"(\\d{1,4}(?:[.,]\\d{1,3})?)\\s*(?:m|metres?|meters?)\\b",
+        r"\b(?:LOA|L\.?O\.?A\.?|length\s+overall)\b[^\d\n]{0,50}"
+        r"(\d{1,4}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
     "lbp_m": re.compile(
-        r"\\b(?:LBP|L\\.?B\\.?P\\.?|length\\s+between\\s+perpendiculars)\\b[^\\d\\n]{0,60}"
-        r"(\\d{1,4}(?:[.,]\\d{1,3})?)\\s*(?:m|metres?|meters?)\\b",
+        r"\b(?:LBP|L\.?B\.?P\.?|length\s+between\s+perpendiculars)\b[^\d\n]{0,60}"
+        r"(\d{1,4}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
-        r"\\b(?:moulded\\s+breadth|moulded\\s+beam|breadth)\\b[^\\d\\n]{0,50}"
-        r"(\\d{1,3}(?:[.,]\\d{1,3})?)\\s*(?:m|metres?|meters?)\\b",
+        r"\b(?:moulded\s+breadth|moulded\s+beam|breadth)\b[^\d\n]{0,50}"
+        r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
     "moulded_depth_m": re.compile(
-        r"\\b(?:moulded\\s+depth|depth)\\b[^\\d\\n]{0,50}"
-        r"(\\d{1,3}(?:[.,]\\d{1,3})?)\\s*(?:m|metres?|meters?)\\b",
+        r"\b(?:moulded\s+depth|depth)\b[^\d\n]{0,50}"
+        r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
 }
