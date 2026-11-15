@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import (
+    CalculationRunRecord,
     DocumentCandidateDecisionRecord,
     LoadingConditionRecord,
     LoadingItemRecord,
@@ -26,10 +27,20 @@ from app.models import (
     VesselDataRevisionRecord,
     VesselRecord,
 )
+from app.schemas.calculation import LoadingCalculationRequest
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
 from app.services.dataset_coverage import build_dataset_coverage
+from app.services.loading_calculations import (
+    CalculationInputError,
+    HydrostaticPoint,
+    KNPoint,
+    Lightship,
+    WeightItem,
+    calculate_gz_curve,
+    calculate_loading_condition,
+)
 from app.services.pdf_table_extractor import extract_pdf_tables
 from app.services.vessel_document_extractor import (
     build_extraction_report,
@@ -38,6 +49,7 @@ from app.services.vessel_document_extractor import (
 )
 
 logger = logging.getLogger(__name__)
+_CALCULATION_ENGINE_VERSION = "stage-1.1"
 
 app = FastAPI(
     title="ShipLoad API",
@@ -83,8 +95,8 @@ def health() -> dict[str, str]:
 def status_endpoint() -> dict[str, str]:
     return {
         "project": "ShipLoad",
-        "stage": "loading_condition_storage",
-        "calculation_engine": "not_implemented",
+        "stage": "preliminary_loading_calculation",
+        "calculation_engine": _CALCULATION_ENGINE_VERSION,
         "operational_approval": "not_approved",
     }
 
@@ -975,4 +987,146 @@ def validate_loading_condition(
             "значения требуют проверки человеком. Расчёт водоизмещения, дифферента "
             "и остойчивости не выполнялся."
         ),
+    }
+
+
+def _calculation_run_summary(record: CalculationRunRecord) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "vessel_id": record.vessel_id,
+        "name": record.name,
+        "vessel_data_revision": record.vessel_data_revision,
+        "engine_version": record.engine_version,
+        "status": record.status,
+        "created_at": record.created_at.isoformat(),
+        "displacement_t": record.calculation_result["outputs"]["displacement_t"],
+        "mean_draft_m": record.calculation_result["outputs"]["mean_draft_m"],
+    }
+
+
+@app.post("/api/v1/calculations/loading-condition", status_code=status.HTTP_201_CREATED,
+          tags=["calculations"])
+def create_loading_calculation(
+    request: LoadingCalculationRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Calculate from explicit source-backed inputs and persist an immutable estimate."""
+    if session.get(VesselRecord, request.vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    lightship = Lightship(
+        mass_t=request.lightship.mass_t,
+        lcg_m=request.lightship.lcg_m,
+        tcg_m=request.lightship.tcg_m,
+        vcg_m=request.lightship.vcg_m,
+        forward_moment_tm=request.lightship.forward_strength_moment_tm,
+    )
+    items = [
+        WeightItem(
+            name=item.name,
+            mass_t=item.mass_t,
+            lcg_m=item.lcg_m,
+            tcg_m=item.tcg_m,
+            vcg_m=item.vcg_m,
+            free_surface_moment_tm=item.free_surface_moment_tm,
+            include_in_forward_strength=item.include_in_forward_strength,
+        )
+        for item in request.items
+    ]
+    hydrostatic_table = [
+        HydrostaticPoint(
+            displacement_volume_m3=row.displacement_volume_m3,
+            draft_extreme_m=row.draft_extreme_m,
+            lcf_from_ap_m=row.lcf_from_ap_m,
+            lcb_from_ap_m=row.lcb_from_ap_m,
+            transverse_metacentre_z_m=row.transverse_metacentre_z_m,
+            mct_t_m_per_cm=row.mct_t_m_per_cm,
+        )
+        for row in request.hydrostatic_table
+    ]
+    try:
+        outputs = calculate_loading_condition(
+            lightship=lightship,
+            items=items,
+            lbp_m=request.lbp_m,
+            seawater_density_t_m3=request.seawater_density_t_m3,
+            hydrostatic_table=hydrostatic_table,
+        )
+    except CalculationInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    warnings = [
+        "Предварительный расчёт по учебной методике; он не одобрен для эксплуатационных решений.",
+        "Программа проверяет заданные источники по ссылкам, но не подтверждает их точность.",
+        "Критерии IMO/Class, ветер, заливание и пределы прочности этим запуском не проверялись.",
+    ]
+    stability_curve = None
+    if request.kn_curve:
+        stability_curve = calculate_gz_curve(
+            kn_curve=[KNPoint(heel_angle_deg=point.heel_angle_deg, kn_m=point.kn_m)
+                      for point in request.kn_curve],
+            corrected_vcg_m=outputs["corrected_vcg_m"],
+        )
+    else:
+        warnings.append("Кривая KN не задана: проверка больших углов крена не выполнена.")
+    if outputs["forward_strength_moment_tm"] is None:
+        warnings.append("Проверка общего продольного момента не выполнена: исходный момент порожнего судна не задан.")
+    calculation_result = {
+        "status": "ESTIMATE_ONLY",
+        "engine_version": _CALCULATION_ENGINE_VERSION,
+        "outputs": outputs,
+        "stability_curve": stability_curve,
+        "warnings": warnings,
+        "interpolation": {
+            "method": "linear_between_adjacent_hydrostatic_rows",
+            "extrapolation": "prohibited",
+            "table_volume_min_m3": min(row.displacement_volume_m3 for row in hydrostatic_table),
+            "table_volume_max_m3": max(row.displacement_volume_m3 for row in hydrostatic_table),
+        },
+    }
+    record = CalculationRunRecord(
+        vessel_id=request.vessel_id,
+        name=request.name,
+        vessel_data_revision=request.vessel_data_revision,
+        engine_version=_CALCULATION_ENGINE_VERSION,
+        status="ESTIMATE_ONLY",
+        calculation_input=request.model_dump(mode="json"),
+        calculation_result=calculation_result,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return {
+        **_calculation_run_summary(record),
+        "calculation_input": record.calculation_input,
+        "calculation_result": calculation_result,
+    }
+
+
+@app.get("/api/v1/vessels/{vessel_id}/calculation-runs", tags=["calculations"])
+def list_loading_calculations(
+    vessel_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> list[dict[str, object]]:
+    if session.get(VesselRecord, vessel_id) is None:
+        raise HTTPException(status_code=404, detail="Судно не найдено")
+    records = session.scalars(
+        select(CalculationRunRecord)
+        .where(CalculationRunRecord.vessel_id == vessel_id)
+        .order_by(CalculationRunRecord.created_at.desc())
+    ).all()
+    return [_calculation_run_summary(record) for record in records]
+
+
+@app.get("/api/v1/calculation-runs/{run_id}", tags=["calculations"])
+def get_loading_calculation(
+    run_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    record = session.get(CalculationRunRecord, run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Расчёт не найден")
+    return {
+        **_calculation_run_summary(record),
+        "calculation_input": record.calculation_input,
+        "calculation_result": record.calculation_result,
     }

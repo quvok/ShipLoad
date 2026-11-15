@@ -6,6 +6,7 @@ stability booklet, class criteria, or an approved ship loading instrument.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ class Lightship:
     lcg_m: float
     tcg_m: float
     vcg_m: float
-    forward_moment_tm: float
+    forward_moment_tm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,12 @@ class HydrostaticPoint:
     lcb_from_ap_m: float
     transverse_metacentre_z_m: float
     mct_t_m_per_cm: float
+
+
+@dataclass(frozen=True)
+class KNPoint:
+    heel_angle_deg: float
+    kn_m: float
 
 
 def _finite_positive(value: float, name: str) -> None:
@@ -117,7 +124,7 @@ def calculate_loading_condition(
     lbp_m: float,
     seawater_density_t_m3: float,
     hydrostatic_table: Sequence[HydrostaticPoint],
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """Calculate weight moments, drafts, trim, heel, GM and forward strength moment.
 
     Coordinate convention follows the course project: origin at AP on baseline;
@@ -130,10 +137,11 @@ def calculate_loading_condition(
         ("lightship.lcg_m", lightship.lcg_m),
         ("lightship.tcg_m", lightship.tcg_m),
         ("lightship.vcg_m", lightship.vcg_m),
-        ("lightship.forward_moment_tm", lightship.forward_moment_tm),
     ):
         if not math.isfinite(value):
             raise CalculationInputError(f"{name} must be finite")
+    if lightship.forward_moment_tm is not None and not math.isfinite(lightship.forward_moment_tm):
+        raise CalculationInputError("lightship.forward_moment_tm must be finite")
 
     displacement_t = lightship.mass_t
     moment_x_tm = lightship.mass_t * lightship.lcg_m
@@ -158,8 +166,16 @@ def calculate_loading_condition(
         moment_y_tm += item.mass_t * item.tcg_m
         moment_z_tm += item.mass_t * item.vcg_m
         free_surface_moment_tm += item.free_surface_moment_tm
-        if item.include_in_forward_strength and item.lcg_m > lbp_m / 2:
+        if forward_moment_tm is not None and item.include_in_forward_strength and item.lcg_m > lbp_m / 2:
             forward_moment_tm += item.mass_t * (item.lcg_m - lbp_m / 2)
+        aggregate_values = (
+            displacement_t, moment_x_tm, moment_y_tm, moment_z_tm,
+            free_surface_moment_tm,
+        )
+        if not all(math.isfinite(value) for value in aggregate_values) or (
+            forward_moment_tm is not None and not math.isfinite(forward_moment_tm)
+        ):
+            raise CalculationInputError("Aggregate loading moments exceed the supported numeric range")
 
     if displacement_t <= 0:
         raise CalculationInputError("Total displacement must be positive")
@@ -219,4 +235,96 @@ def calculate_loading_condition(
         "trim_angle_deg": trim_angle_deg,
         "heel_deg_port_positive": heel_deg,
         "forward_strength_moment_tm": forward_moment_tm,
+    }
+
+
+def calculate_gz_curve(
+    *,
+    kn_curve: Sequence[KNPoint],
+    corrected_vcg_m: float,
+) -> dict[str, object]:
+    """Convert a source KN curve to GZ and integrate the tabulated righting arms."""
+    if not math.isfinite(corrected_vcg_m):
+        raise CalculationInputError("corrected_vcg_m must be finite")
+    if len(kn_curve) < 2:
+        raise CalculationInputError("At least two KN curve points are required")
+    points = sorted(kn_curve, key=lambda point: point.heel_angle_deg)
+    if points[0].heel_angle_deg != 0 or not math.isclose(points[0].kn_m, 0, abs_tol=1e-6):
+        raise CalculationInputError("KN curve must start at heel angle 0 with KN=0")
+    for index, point in enumerate(points):
+        if not math.isfinite(point.heel_angle_deg) or not 0 <= point.heel_angle_deg <= 180:
+            raise CalculationInputError("KN heel angles must be finite and between 0 and 180 degrees")
+        if not math.isfinite(point.kn_m):
+            raise CalculationInputError("KN curve contains a non-finite arm")
+        if index and point.heel_angle_deg <= points[index - 1].heel_angle_deg:
+            raise CalculationInputError("KN curve heel angles must be strictly increasing")
+
+    curve: list[dict[str, float]] = []
+    accumulated = 0.0
+    previous_angle = 0.0
+    previous_gz = 0.0
+    for point in points:
+        radians = math.radians(point.heel_angle_deg)
+        gz = point.kn_m - corrected_vcg_m * math.sin(radians)
+        if not math.isfinite(gz):
+            raise CalculationInputError("Calculated GZ exceeds the supported numeric range")
+        if curve:
+            accumulated += (previous_gz + gz) * 0.5 * math.radians(
+                point.heel_angle_deg - previous_angle
+            )
+        curve.append({
+            "heel_angle_deg": point.heel_angle_deg,
+            "kn_m": point.kn_m,
+            "gz_m": gz,
+            "dynamic_arm_m_rad": accumulated,
+        })
+        previous_angle = point.heel_angle_deg
+        previous_gz = gz
+
+    def arm_at(angle: float) -> float | None:
+        if angle > points[-1].heel_angle_deg:
+            return None
+        for index, point in enumerate(points):
+            if math.isclose(point.heel_angle_deg, angle, rel_tol=0, abs_tol=1e-9):
+                return curve[index]["gz_m"]
+            if index and points[index - 1].heel_angle_deg < angle < point.heel_angle_deg:
+                left = points[index - 1]
+                right = point
+                fraction = (angle - left.heel_angle_deg) / (
+                    right.heel_angle_deg - left.heel_angle_deg
+                )
+                return curve[index - 1]["gz_m"] + fraction * (
+                    curve[index]["gz_m"] - curve[index - 1]["gz_m"]
+                )
+        return None
+
+    def area_to(angle: float) -> float | None:
+        terminal_arm = arm_at(angle)
+        if terminal_arm is None:
+            return None
+        included = [(0.0, 0.0)]
+        included.extend(
+            (row["heel_angle_deg"], row["gz_m"])
+            for row in curve if 0 < row["heel_angle_deg"] < angle
+        )
+        included.append((angle, terminal_arm))
+        return sum(
+            (left_y + right_y) * 0.5 * math.radians(right_x - left_x)
+            for (left_x, left_y), (right_x, right_y) in itertools.pairwise(included)
+        )
+
+    maximum = max(curve, key=lambda row: row["gz_m"])
+    return {
+        "method": "GZ = KN - corrected_VCG * sin(heel); trapezoidal integration in radians",
+        "points": curve,
+        "maximum_gz_m": maximum["gz_m"],
+        "heel_angle_at_maximum_deg": maximum["heel_angle_deg"],
+        "area_to_30_deg_m_rad": area_to(30),
+        "area_to_40_deg_m_rad": area_to(40),
+        "area_30_to_40_deg_m_rad": (
+            area_to(40) - area_to(30)
+            if area_to(30) is not None and area_to(40) is not None else None
+        ),
+        "status": "ESTIMATE_ONLY",
+        "note": "Критерии IMO/Class и угол заливания автоматически не оцениваются этим модулем.",
     }

@@ -14,7 +14,7 @@ def test_health_endpoint() -> None:
 def test_status_does_not_claim_operational_readiness() -> None:
     response = client.get("/api/v1/status")
     assert response.status_code == 200
-    assert response.json()["calculation_engine"] == "not_implemented"
+    assert response.json()["calculation_engine"] == "stage-1.1"
     assert response.json()["operational_approval"] == "not_approved"
 
 

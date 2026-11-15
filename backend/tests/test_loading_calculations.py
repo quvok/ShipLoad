@@ -3,8 +3,10 @@ import pytest
 from app.services.loading_calculations import (
     CalculationInputError,
     HydrostaticPoint,
+    KNPoint,
     Lightship,
     WeightItem,
+    calculate_gz_curve,
     calculate_loading_condition,
     interpolate_hydrostatics,
 )
@@ -143,3 +145,56 @@ def test_forward_longitudinal_moment_adds_only_loads_forward_of_midship():
     assert result["forward_strength_moment_tm"] == pytest.approx(
         1_386_360.0 + 100.0 * (200.0 - 50.0)
     )
+
+
+def test_kn_curve_calculates_gz_and_dynamic_stability_without_extrapolation():
+    curve = calculate_gz_curve(
+        kn_curve=[KNPoint(0, 0), KNPoint(10, 4.429), KNPoint(20, 8.785),
+                  KNPoint(30, 13.061), KNPoint(40, 15.975)],
+        corrected_vcg_m=17.72,
+    )
+    assert curve["points"][3]["gz_m"] == pytest.approx(4.201, abs=0.01)
+    assert curve["area_to_30_deg_m_rad"] == pytest.approx(1.07, abs=0.03)
+    assert curve["area_to_40_deg_m_rad"] is not None
+
+    limited = calculate_gz_curve(
+        kn_curve=[KNPoint(0, 0), KNPoint(20, 8.785)],
+        corrected_vcg_m=17.72,
+    )
+    assert limited["area_to_30_deg_m_rad"] is None
+
+
+def test_course_project_optimal_plan_with_source_hydrostatic_bracket():
+    lightship = Lightship(47087.2, 119.245, -0.106, 16.538)
+    items = [
+        WeightItem("Cargo", 84190, 154.03, 0, 16.77, 103989.5),
+        WeightItem("Fresh water", 279.8, 17.16, 5.83, 23.32, 778.6),
+        WeightItem("Diesel", 220, 49.99, 20.36, 16.32, 278.3),
+        WeightItem("Oil", 395.4, 24.23, -0.54, 19.62, 248.6),
+        WeightItem("Heavy fuel", 4086, 202.93, -0.09, 16.05, 22669.7),
+        WeightItem("Waste", 247, 31.59, 20.01, 12.90, 231.8),
+        WeightItem("Other weights", 199, 110.02, 0, 28.38, 20),
+        WeightItem("Aft peak ballast", 1100, -9.20, 0, 16.09, 13705.9),
+    ]
+    hydro = [
+        HydrostaticPoint(134919, 12.65, 129.61, 141.39, 25.44, 2780.6),
+        HydrostaticPoint(135573, 12.70, 129.49, 141.33, 25.41, 2792.7),
+    ]
+    result = calculate_loading_condition(
+        lightship=lightship,
+        items=items,
+        lbp_m=283.1,
+        seawater_density_t_m3=1.018,
+        hydrostatic_table=hydro,
+    )
+
+    assert result["displacement_t"] == pytest.approx(137804.4)
+    assert result["lcg_m"] == pytest.approx(141.19, abs=0.02)
+    assert result["tcg_m"] == pytest.approx(0.04, abs=0.02)
+    assert result["corrected_vcg_m"] == pytest.approx(17.72, abs=0.02)
+    assert result["corrected_initial_gm_m"] == pytest.approx(7.70, abs=0.03)
+    assert result["forward_draft_m"] == pytest.approx(12.68, abs=0.02)
+    assert result["aft_draft_m"] == pytest.approx(12.76, abs=0.02)
+    assert result["mean_draft_m"] == pytest.approx(12.72, abs=0.02)
+    assert result["trim_m"] == pytest.approx(-0.08, abs=0.02)
+    assert result["heel_deg_port_positive"] == pytest.approx(0.30, abs=0.02)

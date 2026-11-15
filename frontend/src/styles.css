@@ -24,4 +24,23 @@
 .report-section ul,.extraction-report .form-hint ul{padding-left:17px}
 .report-section li{margin:6px 0}
 .extraction-report .form-hint{margin-top:15px}
+.wide-field{grid-column:1/-1}
+.calculation-results{margin:16px 0}
+.calculation-provenance{margin-top:18px;padding:16px;border:1px solid #293e51;border-radius:7px;background:#0e1b29;color:#aab9c5;font-size:10px;line-height:1.6;overflow-wrap:anywhere}
+.calculation-provenance h3{margin:0 0 8px;color:#dce6ed;font-size:12px}
+.calculation-provenance ul{padding-left:19px}
+.calculation-provenance li{margin:5px 0}
+.page-heading>.secondary-button{margin:0;flex-shrink:0}
+@media(max-width:620px){.wide-field{grid-column:auto}.page-heading>.secondary-button{width:100%}}
+@media print{
+  body{background:#fff;color:#111}
+  body *{visibility:hidden!important}
+  .calculation-results,.calculation-results *{visibility:visible!important}
+  .calculation-results{position:absolute;inset:0;width:100%;margin:0;padding:18px;border:0;border-radius:0;background:#fff;color:#111}
+  .calculation-results h2,.calculation-results h3,.calculation-results strong{color:#111}
+  .calculation-results .metric-card,.calculation-results .calculation-provenance{break-inside:avoid;background:#fff;border:1px solid #bbb;color:#111}
+  .calculation-results .metric-label,.calculation-results .metric-detail,.calculation-results .form-hint,.calculation-results p,.calculation-results li{color:#333}
+  .calculation-results .vessel-table th,.calculation-results .vessel-table td{color:#111;border-color:#bbb}
+  .print-button{display:none!important}
+}
 @media(max-width:760px){.report-section-grid{grid-template-columns:1fr}}

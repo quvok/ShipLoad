@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import CalculationPage from "./CalculationPage";
 
 type NavKey = "overview" | "vessels" | "tanks" | "documents" | "loading" | "reports";
 type VesselType = "general_cargo" | "container" | "bulk_carrier" | "tanker" | "multipurpose" | "other";
@@ -25,6 +26,7 @@ function App() {
   const [active, setActive] = useState<NavKey>("overview");
   const [vessels, setVessels] = useState<Vessel[]>([]);
   const [apiState, setApiState] = useState<"checking" | "online" | "offline">("checking");
+  const [workspaceCounts, setWorkspaceCounts] = useState({ documents: 0, conditions: 0, calculations: 0 });
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -44,6 +46,31 @@ function App() {
   }, []);
 
   useEffect(() => { void loadVessels(); }, [loadVessels]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCounts() {
+      if (!vessels.length) { setWorkspaceCounts({ documents: 0, conditions: 0, calculations: 0 }); return; }
+      const totals = await Promise.all(vessels.map(async vessel => {
+        const endpoints = [
+          `/vessels/${encodeURIComponent(vessel.id)}/documents`,
+          `/vessels/${encodeURIComponent(vessel.id)}/loading-conditions`,
+          `/vessels/${encodeURIComponent(vessel.id)}/calculation-runs`,
+        ];
+        const counts = await Promise.all(endpoints.map(async path => {
+          try { const response = await fetch(`${API}${path}`); return response.ok ? (await response.json() as unknown[]).length : 0; }
+          catch { return 0; }
+        }));
+        return { documents: counts[0], conditions: counts[1], calculations: counts[2] };
+      }));
+      if (!cancelled) setWorkspaceCounts(totals.reduce((sum,row) => ({
+        documents: sum.documents + row.documents, conditions: sum.conditions + row.conditions,
+        calculations: sum.calculations + row.calculations,
+      }), { documents: 0, conditions: 0, calculations: 0 }));
+    }
+    void loadCounts();
+    return () => { cancelled = true; };
+  }, [vessels]);
 
   async function createVessel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
@@ -82,7 +109,7 @@ function App() {
       <main className="main">
         <header className="topbar"><div><span className="breadcrumb">Рабочая область</span><span className="slash">/</span><strong>{navigation.find((item) => item.key === active)?.label}</strong></div><div className="topbar-right"><span className="env-tag">РАЗРАБОТКА</span><a className="help-button" href="https://github.com/quvok/ShipLoad" target="_blank" rel="noreferrer">Репозиторий ↗</a></div></header>
         <section className="content">
-          {active === "documents" ? (<DocumentsPage vessels={vessels} apiState={apiState} />) : active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
+          {active === "documents" ? (<DocumentsPage vessels={vessels} apiState={apiState} />) : active === "loading" ? (<LoadingPage vessels={vessels} apiState={apiState} />) : active === "reports" ? (<CalculationPage vessels={vessels} apiState={apiState} />) : active === "tanks" ? (
             <TanksPage vessels={vessels} apiState={apiState} />
           ) : active === "vessels" ? (
             <VesselsPage vessels={vessels} apiState={apiState} showForm={showForm} setShowForm={setShowForm}
@@ -90,12 +117,12 @@ function App() {
           ) : (
             <>
               <div className="page-heading"><div><div className="eyebrow">СУДОВОЖДЕНИЕ / ИНЖЕНЕРНЫЕ РАСЧЁТЫ</div><h1>{active === "overview" ? "Рабочая область судна" : navigation.find((item) => item.key === active)?.label}</h1><p>Управление данными судна, проверка судовой документации и подготовка загрузочных условий.</p></div><button className="primary-button" onClick={() => { setActive("vessels"); setShowForm(true); }}>＋ Добавить судно</button></div>
-              <div className="notice"><span className="notice-icon">!</span><div><strong>Тестовая версия — не допущена к эксплуатации</strong><p>Расчёты остойчивости и загрузки пока не реализованы. Не используйте приложение для принятия решений, влияющих на безопасность судна.</p></div></div>
+              <div className="notice"><span className="notice-icon">!</span><div><strong>Предварительные расчёты доступны в разделе «Расчёты»</strong><p>Результаты учебные и требуют проверки исходных документов. Приложение не одобрено для оперативных решений о загрузке судна.</p></div></div>
               <div className="metric-grid">
                 <Metric label="СУДА" value={String(vessels.length)} detail={vessels.length ? "Профили в локальной базе" : "Профили судов ещё не созданы"} />
-                <Metric label="СУДОВЫЕ ДОКУМЕНТЫ" value="0" detail="Ожидается первая загрузка" />
-                <Metric label="ЗАГРУЗОЧНЫЕ УСЛОВИЯ" value="0" detail="Условия загрузки не созданы" />
-                <Metric label="ПРОВЕРЕННЫЕ РАСЧЁТЫ" value="0" detail="Эталонные случаи не настроены" />
+                <Metric label="СУДОВЫЕ ДОКУМЕНТЫ" value={String(workspaceCounts.documents)} detail={workspaceCounts.documents ? "Сохранено в локальной базе" : "Документы ещё не добавлены"} />
+                <Metric label="ЗАГРУЗОЧНЫЕ УСЛОВИЯ" value={String(workspaceCounts.conditions)} detail={workspaceCounts.conditions ? "Черновые условия в локальной базе" : "Условия загрузки не созданы"} />
+                <Metric label="СОХРАНЁННЫЕ РАСЧЁТЫ" value={String(workspaceCounts.calculations)} detail={workspaceCounts.calculations ? "Предварительные расчёты, ESTIMATE_ONLY" : "Пока нет запусков расчёта"} />
               </div>
               <div className="section-grid">
                 <section className="panel getting-started"><div className="panel-heading"><div><div className="eyebrow">НАЧАЛО РАБОТЫ</div><h2>Настройка первого судна</h2></div><span className="step-count">{vessels.length ? "1" : "0"} / 4</span></div>
@@ -107,8 +134,8 @@ function App() {
                 </section>
                 <section className="panel status-panel"><div className="eyebrow">СОСТОЯНИЕ СИСТЕМЫ</div><h2>Расчётные модули</h2>
                   <StatusRow name="Локальная база данных" status={apiState === "online" ? "Подключена" : apiState === "checking" ? "Проверка" : "Нет подключения"} />
-                  <StatusRow name="Распознавание документов" status="Не реализовано" /><StatusRow name="Гидростатические расчёты" status="Не реализованы" /><StatusRow name="Проверка критериев остойчивости" status="Не реализована" /><StatusRow name="Формирование отчётов" status="Не реализовано" />
-                  <div className="status-foot">Модули будут доступны после выполнения требований к проверке и подтверждению данных.</div>
+                  <StatusRow name="Посадка, дифферент, GM и крен" status="Учебный расчёт доступен" /><StatusRow name="Гидростатическая интерполяция" status="Без экстраполяции" /><StatusRow name="Критерии IMO/Class и полная ДСО" status="Требуют отдельной валидации" />
+                  <div className="status-foot">Откройте «Расчёты», введите сверенные данные или загрузите учебный пример из курсового проекта.</div>
                 </section>
               </div>
             </>
