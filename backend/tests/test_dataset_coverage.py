@@ -103,3 +103,36 @@ def test_generic_loading_evidence_is_not_misreported_as_strength_data():
     loading = _dataset(coverage, "loading_conditions")
     assert strength["status"] == "NO_EVIDENCE_FOUND_NOT_PROVEN_ABSENT"
     assert loading["status"] == "TEXT_EVIDENCE_REVIEW_REQUIRED"
+
+
+
+def test_specialized_vessel_datasets_are_reported_separately():
+    coverage = build_dataset_coverage(
+        {"sections": {}},
+        {
+            "status": "TABLE_PREVIEWS_FOUND",
+            "tables": [
+                {"page": 152, "kind": "free_surface"},
+                {"page": 140, "kind": "draft_corrections"},
+                {"page": 142, "kind": "windage"},
+                {"page": 144, "kind": "ice_loading"},
+                {"page": 165, "kind": "inclining_experiment"},
+                {"page": 138, "kind": "propeller_immersion"},
+                {"page": 133, "kind": "trimming_table"},
+            ],
+        },
+    )
+
+    expected = {
+        "free_surface_moments": [152],
+        "draft_corrections": [140],
+        "windage": [142],
+        "ice_loading": [144],
+        "inclining_experiment": [165],
+        "propeller_immersion": [138],
+        "trimming_tables": [133],
+    }
+    for key, pages in expected.items():
+        dataset = _dataset(coverage, key)
+        assert dataset["status"] == "TABLE_EVIDENCE_REVIEW_REQUIRED"
+        assert dataset["evidence_pages"] == pages
