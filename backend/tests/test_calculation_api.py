@@ -96,3 +96,39 @@ def test_calculation_endpoint_rejects_hydrostatic_extrapolation():
     response = client.post("/api/v1/calculations/loading-condition", json=payload)
     assert response.status_code == 422
     assert "extrapolation is prohibited" in response.json()["detail"]
+
+
+def test_full_course_project_example_calculates_with_all_source_items():
+    vessel = client.post("/api/v1/vessels", json=vessel_payload()).json()
+    payload = calculation_payload(vessel["id"])
+    source = "КП KP_TUS_Gr1_P18_3, таблица оптимального плана, стр. 17"
+    payload["items"] = [
+        {"name": name, "mass_t": mass, "lcg_m": lcg, "tcg_m": tcg,
+         "vcg_m": vcg, "free_surface_moment_tm": fsm, "source_reference": source}
+        for name, mass, lcg, tcg, vcg, fsm in [
+            ("Груз", 84190.0, 154.03, 0, 16.77, 103989.5),
+            ("Пресная вода", 279.8, 17.16, 5.83, 23.32, 778.6),
+            ("Дизельное топливо", 220.0, 49.99, 20.36, 16.32, 278.3),
+            ("Масло", 395.4, 24.23, -0.54, 19.62, 248.6),
+            ("Тяжёлое топливо", 4086.0, 202.93, -0.09, 16.05, 22669.7),
+            ("Отходы", 247.0, 31.59, 20.01, 12.90, 231.8),
+            ("Сторонние нагрузки", 199.0, 110.02, 0, 28.38, 20.0),
+            ("Балласт в ахтерпике", 1100.0, -9.20, 0, 16.09, 13705.9),
+        ]
+    ]
+    payload["kn_curve"] = [
+        {"heel_angle_deg": angle, "kn_m": kn,
+         "source_reference": "КП KP_TUS_Gr1_P18_3, таблица 6.1"}
+        for angle, kn in [
+            (0, 0), (0.1, 0.045), (5, 2.222), (10, 4.429), (15, 6.609),
+            (20, 8.785), (30, 13.061), (40, 15.975), (50, 17.598), (60, 18.421),
+        ]
+    ]
+    response = client.post("/api/v1/calculations/loading-condition", json=payload)
+    assert response.status_code == 201, response.text
+    outputs = response.json()["calculation_result"]["outputs"]
+    assert outputs["displacement_t"] == 137804.4
+    assert outputs["displacement_volume_m3"] == pytest.approx(135367.78, abs=0.01)
+    assert outputs["corrected_initial_gm_m"] == pytest.approx(7.695, abs=0.01)
+    assert outputs["mean_draft_m"] == pytest.approx(12.720, abs=0.01)
+    assert outputs["heel_deg_port_positive"] == pytest.approx(0.296, abs=0.01)

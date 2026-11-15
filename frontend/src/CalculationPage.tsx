@@ -77,6 +77,21 @@ function courseExample() {
 
 function n(value: string) { return Number(value); }
 function fmt(value: number | null | undefined, digits = 3) { return value == null ? "Не рассчитано" : value.toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits }); }
+function responseError(body: unknown, fallback: string) {
+  if (!body || typeof body !== "object" || !("detail" in body)) return fallback;
+  const detail = (body as { detail: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((entry) => {
+      if (!entry || typeof entry !== "object") return String(entry);
+      const issue = entry as { loc?: unknown[]; msg?: unknown };
+      const path = issue.loc?.filter((part) => part !== "body").join(" → ");
+      return `${path ? `${path}: ` : ""}${typeof issue.msg === "string" ? issue.msg : "ошибка проверки поля"}`;
+    });
+    return messages.length ? `Проверьте данные расчёта: ${messages.join("; ")}` : fallback;
+  }
+  return fallback;
+}
 
 export default function CalculationPage({ vessels, apiState }: { vessels: VesselOption[]; apiState: "checking" | "online" | "offline" }) {
   const [vesselId, setVesselId] = useState("");
@@ -143,7 +158,7 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Расчёт не выполнен. Проверьте исходные данные.");
+      if (!response.ok) throw new Error(responseError(body, `Расчёт не выполнен (HTTP ${response.status}). Проверьте исходные данные.`));
       setResult(body as RunDetails); setNotice("Расчёт выполнен и сохранён в истории как ESTIMATE_ONLY.");
       const historyResponse = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/calculation-runs`);
       if (historyResponse.ok) setHistory(await historyResponse.json() as RunSummary[]);
@@ -156,7 +171,7 @@ export default function CalculationPage({ vessels, apiState }: { vessels: Vessel
     try {
       const response = await fetch(`${API}/calculation-runs/${encodeURIComponent(id)}`);
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(typeof body?.detail === "string" ? body.detail : "Не удалось открыть расчёт.");
+      if (!response.ok) throw new Error(responseError(body, `Не удалось открыть расчёт (HTTP ${response.status}).`));
       setResult(body as RunDetails);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Ошибка истории расчётов."); }
   }
