@@ -1,10 +1,12 @@
 import hashlib
 import uuid
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -126,9 +128,6 @@ async def upload_vessel_document(
     )
     if duplicate is not None:
         raise HTTPException(status_code=409, detail="Этот файл уже загружен для данного судна")
-    from io import BytesIO
-    from pypdf import PdfReader
-
     document_id = str(uuid.uuid4())
     stored_name = f"{document_id}.pdf"
     _DOCUMENT_STORAGE.mkdir(parents=True, exist_ok=True)
