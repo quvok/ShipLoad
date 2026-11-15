@@ -56,7 +56,7 @@ def test_document_report_does_not_claim_absence_when_pages_need_ocr():
 
 
 def test_extracts_both_molded_spellings_from_principal_particulars():
-    pages = [(2, "Breadth (Molded) : 50.000 m\\nDepth (Molded) : 26.500 m")]
+    pages = [(2, "Breadth (Molded) : 50.000 m\nDepth (Molded) : 26.500 m")]
     result = extract_principal_particulars(pages)
     values = {item["field"]: item["value"] for item in result}
     assert values["moulded_breadth_m"] == 50.0
