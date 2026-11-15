@@ -169,6 +169,8 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [itemRows, setItemRows] = useState<number[]>([0]);
+  const [nextItemRow, setNextItemRow] = useState(1);
   useEffect(() => {
     if (!vesselId) { setRecords([]); return; }
     let cancelled = false;
@@ -191,17 +193,19 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       name: String(form.get("condition_name") ?? "").trim(),
       vessel_data_revision: String(form.get("revision") ?? "").trim(),
       notes: String(form.get("notes") ?? "").trim() || null,
-      items: [{
-        item_id: String(form.get("item_id") ?? "").trim(),
-        description: String(form.get("description") ?? "").trim(),
-        kind: form.get("kind"),
-        mass_kg: Number(form.get("mass_kg")),
+      items: itemRows.map(index => ({
+        item_id: String(form.get(`item_id_${index}`) ?? "").trim(),
+        description: String(form.get(`description_${index}`) ?? "").trim(),
+        kind: form.get(`kind_${index}`),
+        mass_kg: Number(form.get(`mass_kg_${index}`)),
         position: {
-          x_m: Number(form.get("x_m")), y_m: Number(form.get("y_m")), z_m: Number(form.get("z_m")),
-          position_source: String(form.get("position_source") ?? "").trim(),
+          x_m: Number(form.get(`x_m_${index}`)),
+          y_m: Number(form.get(`y_m_${index}`)),
+          z_m: Number(form.get(`z_m_${index}`)),
+          position_source: String(form.get(`position_source_${index}`) ?? "").trim(),
         },
-        source_reference: String(form.get("source_reference") ?? "").trim(),
-      }],
+        source_reference: String(form.get(`source_reference_${index}`) ?? "").trim(),
+      })),
     };
     try {
       const response = await fetch(`${API}/loading-conditions`, {
@@ -232,15 +236,22 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
           <label>Судно<select required value={vesselId} onChange={event => setVesselId(event.target.value)}><option value="">Выберите судно</option>{vessels.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
           <label>Название условия<input name="condition_name" required maxLength={120} placeholder="Например, Перед выходом из порта" /></label>
           <label>Версия исходных данных судна<input name="revision" required maxLength={80} placeholder="Идентификатор ревизии / черновика" /></label>
-          <label>Идентификатор нагрузки<input name="item_id" required maxLength={80} placeholder="Например, cargo-001" /></label>
-          <label>Описание нагрузки<input name="description" required maxLength={240} placeholder="Описание по грузовому плану" /></label>
-          <label>Тип нагрузки<select name="kind" defaultValue="cargo"><option value="cargo">Груз</option><option value="stores">Судовые запасы</option><option value="crew_and_effects">Экипаж и багаж</option><option value="other">Другое</option></select></label>
-          <label>Масса, кг<input name="mass_kg" type="number" min="0.001" step="0.001" required /></label>
-          <label>Координата X, м<input name="x_m" type="number" step="0.001" required /></label>
-          <label>Координата Y, м<input name="y_m" type="number" step="0.001" required /></label>
-          <label>Координата Z, м<input name="z_m" type="number" step="0.001" required /></label>
-          <label>Источник координат<input name="position_source" required minLength={3} maxLength={500} placeholder="План размещения, шпангоут / отметка" /></label>
-          <label>Источник массы<input name="source_reference" required minLength={3} maxLength={500} placeholder="Грузовой манифест, накладная, ведомость" /></label>
+          {itemRows.map((index, rowNumber) => <div className="load-item-editor" key={index}>
+            <div className="form-subheading">Нагрузка {rowNumber + 1}</div>
+            <div className="form-grid">
+              <label>Идентификатор<input name={`item_id_${index}`} required maxLength={80} placeholder="Например, cargo-001" /></label>
+              <label>Описание<input name={`description_${index}`} required maxLength={240} placeholder="Описание по грузовому плану" /></label>
+              <label>Тип нагрузки<select name={`kind_${index}`} defaultValue="cargo"><option value="cargo">Груз</option><option value="stores">Судовые запасы</option><option value="crew_and_effects">Экипаж и багаж</option><option value="other">Другое</option></select></label>
+              <label>Масса, кг<input name={`mass_kg_${index}`} type="number" min="0.001" step="0.001" required /></label>
+              <label>Координата X, м<input name={`x_m_${index}`} type="number" step="0.001" required /></label>
+              <label>Координата Y, м<input name={`y_m_${index}`} type="number" step="0.001" required /></label>
+              <label>Координата Z, м<input name={`z_m_${index}`} type="number" step="0.001" required /></label>
+              <label>Источник координат<input name={`position_source_${index}`} required minLength={3} maxLength={500} placeholder="План размещения, шпангоут / отметка" /></label>
+              <label>Источник массы<input name={`source_reference_${index}`} required minLength={3} maxLength={500} placeholder="Грузовой манифест, накладная, ведомость" /></label>
+            </div>
+            {itemRows.length > 1 && <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setItemRows(rows => rows.filter(row => row !== index))}>Удалить эту нагрузку</button></div>}
+          </div>)}
+          <div className="form-actions"><button type="button" className="secondary-button" onClick={() => { setItemRows(rows => [...rows, nextItemRow]); setNextItemRow(value => value + 1); }}>＋ Добавить нагрузку</button></div>
         </div>
         <label className="notes-label">Примечание<textarea name="notes" maxLength={2000} rows={2} placeholder="Необязательное примечание" /></label>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Сохранение…" : "Сохранить черновик"}</button></div>
