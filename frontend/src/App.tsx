@@ -183,7 +183,7 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice(""); setBusy(true);
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;\n    const form = new FormData(formElement);
     const payload = {
       vessel_id: vesselId,
       name: String(form.get("condition_name") ?? "").trim(),
