@@ -266,14 +266,7 @@ def get_document_candidates(
                     "decided_at": decision.decided_at.isoformat(),
                     "comment": decision.comment,
                     "approved_value": decision.approved_value,
-                    "revision_number": (
-                        session.scalar(
-                            select(VesselDataRevisionRecord.revision_number)
-                            .where(VesselDataRevisionRecord.vessel_id == record.vessel_id)
-                            .order_by(VesselDataRevisionRecord.revision_number.desc())
-                            .limit(1)
-                        ) if decision.decision == "APPROVE" else None
-                    ),
+                    "revision_number": decision.revision_number,
                 } if decision else None
             ),
         })
@@ -375,6 +368,7 @@ def decide_document_candidate(
             "decided_at": datetime.now(UTC).isoformat(),
         }
         revision_number = (latest.revision_number if latest else 0) + 1
+        decision.revision_number = revision_number
         session.add(VesselDataRevisionRecord(
             vessel_id=document.vessel_id,
             revision_number=revision_number,
