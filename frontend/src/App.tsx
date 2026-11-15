@@ -308,7 +308,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
         <p>Проанализировано страниц: <strong>{report.page_count}</strong>; с текстовым слоем: <strong>{report.pages_with_text}</strong>; без извлечённого текста: <strong>{report.pages_without_text.length}</strong>.</p>
         <div className="report-section-grid">{Object.entries(report.sections).map(([key, section]) =>
           <article className="report-section" key={key}>
-            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Нужен OCR" : "Не найдено в тексте"}</span></div>
+            <div className="report-section-heading"><strong>{section.label}</strong><span className="draft-tag">{section.status === "TEXT_EVIDENCE_FOUND_WITH_OCR_GAPS" ? "Совпадения + страницы для OCR" : section.status === "TEXT_EVIDENCE_FOUND" ? "Есть совпадения" : section.status === "OCR_REQUIRED" ? "Нужен OCR" : "Не найдено в тексте"}</span></div>
             <p>{section.note}</p>
             {section.evidence.length > 0 && <ul>{section.evidence.slice(0, 5).map((item, index) =>
               <li key={index}><strong>Стр. {item.page}:</strong> {item.excerpt}</li>
