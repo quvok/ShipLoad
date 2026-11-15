@@ -194,6 +194,19 @@ function TanksPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checki
     void loadTanks(vesselId).catch(cause => setError(cause instanceof Error ? cause.message : "Ошибка загрузки реестра."));
   }, [vesselId, loadTanks]);
 
+  useEffect(() => {
+    if (!vesselId) { setTankOptions([]); return; }
+    let cancelled = false;
+    fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/tanks`)
+      .then(async response => {
+        if (!response.ok) throw new Error("Не удалось получить реестр танков.");
+        return await response.json() as Tank[];
+      })
+      .then(data => { if (!cancelled) setTankOptions(data); })
+      .catch(() => { if (!cancelled) setTankOptions([]); });
+    return () => { cancelled = true; };
+  }, [vesselId]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true); setError(""); setNotice("");
@@ -261,6 +274,9 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
   const [notice, setNotice] = useState("");
   const [itemRows, setItemRows] = useState<number[]>([0]);
   const [nextItemRow, setNextItemRow] = useState(1);
+  const [itemKinds, setItemKinds] = useState<Record<number, string>>({ 0: "cargo" });
+  const [tankOptions, setTankOptions] = useState<Tank[]>([]);
+  const liquidKinds = new Set(["ballast", "fuel_oil", "diesel_oil", "fresh_water", "lubricating_oil"]);
   useEffect(() => {
     if (!vesselId) { setRecords([]); return; }
     let cancelled = false;
@@ -283,19 +299,24 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       name: String(form.get("condition_name") ?? "").trim(),
       vessel_data_revision: String(form.get("revision") ?? "").trim(),
       notes: String(form.get("notes") ?? "").trim() || null,
-      items: itemRows.map(index => ({
-        item_id: String(form.get(`item_id_${index}`) ?? "").trim(),
-        description: String(form.get(`description_${index}`) ?? "").trim(),
-        kind: form.get(`kind_${index}`),
-        mass_kg: Number(form.get(`mass_kg_${index}`)),
-        position: {
-          x_m: Number(form.get(`x_m_${index}`)),
-          y_m: Number(form.get(`y_m_${index}`)),
-          z_m: Number(form.get(`z_m_${index}`)),
-          position_source: String(form.get(`position_source_${index}`) ?? "").trim(),
-        },
-        source_reference: String(form.get(`source_reference_${index}`) ?? "").trim(),
-      })),
+      items: itemRows.map(index => {
+        const kind = String(form.get(`kind_${index}`) ?? "cargo");
+        const isLiquid = liquidKinds.has(kind);
+        return {
+          item_id: String(form.get(`item_id_${index}`) ?? "").trim(),
+          description: String(form.get(`description_${index}`) ?? "").trim(),
+          kind,
+          mass_kg: Number(form.get(`mass_kg_${index}`)),
+          position: isLiquid ? null : {
+            x_m: Number(form.get(`x_m_${index}`)),
+            y_m: Number(form.get(`y_m_${index}`)),
+            z_m: Number(form.get(`z_m_${index}`)),
+            position_source: String(form.get(`position_source_${index}`) ?? "").trim(),
+          },
+          tank_id: isLiquid ? String(form.get(`tank_id_${index}`) ?? "") : null,
+          source_reference: String(form.get(`source_reference_${index}`) ?? "").trim(),
+        };
+      }),
     };
     try {
       const response = await fetch(`${API}/loading-conditions`, {
@@ -311,6 +332,7 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       formElement.reset();
       setItemRows([0]);
       setNextItemRow(1);
+      setItemKinds({ 0: "cargo" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось сохранить запись.");
     } finally { setBusy(false); }
@@ -318,7 +340,7 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
 
   return <>
     <div className="page-heading"><div><div className="eyebrow">ИСХОДНЫЕ ДАННЫЕ ЗАГРУЗКИ</div><h1>Загрузочные условия</h1><p>Сохранение масс и исходных положений. Эта форма не выполняет расчёт водоизмещения или остойчивости.</p></div></div>
-    <div className="notice"><span className="notice-icon">!</span><div><strong>Только черновой ввод</strong><p>В этой версии доступны твёрдые нагрузки с заданными координатами. Танки, жидкие нагрузки, плотности и свободные поверхности ещё не реализованы.</p></div></div>
+    <div className="notice"><span className="notice-icon">!</span><div><strong>Только черновой ввод</strong><p>Для жидких нагрузок можно выбрать зарегистрированный танк и вручную указать массу со ссылкой на проверенный источник замера/расчёта. Преобразование уровня в объём и массу, плотность и поправка на свободную поверхность пока не реализованы.</p></div></div>
     {apiState !== "online" && <div className="inline-alert error">Нет подключения к локальному API. Запустите backend и примените миграции Alembic.</div>}
     {error && <div className="inline-alert error">{error}</div>}{notice && <div className="inline-alert success">{notice}</div>}
     <section className="panel vessel-form-panel">
@@ -333,17 +355,23 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
             <div className="form-grid">
               <label>Идентификатор<input name={`item_id_${index}`} required maxLength={80} placeholder="Например, cargo-001" /></label>
               <label>Описание<input name={`description_${index}`} required maxLength={240} placeholder="Описание по грузовому плану" /></label>
-              <label>Тип нагрузки<select name={`kind_${index}`} defaultValue="cargo"><option value="cargo">Груз</option><option value="stores">Судовые запасы</option><option value="crew_and_effects">Экипаж и багаж</option><option value="other">Другое</option></select></label>
+              <label>Тип нагрузки<select name={`kind_${index}`} value={itemKinds[index] ?? "cargo"} onChange={event => setItemKinds(current => ({ ...current, [index]: event.target.value }))}>
+                <option value="cargo">Груз</option><option value="ballast">Балласт</option><option value="fuel_oil">Топливо</option><option value="diesel_oil">Дизельное топливо</option><option value="fresh_water">Пресная вода</option><option value="lubricating_oil">Смазочное масло</option><option value="stores">Судовые запасы</option><option value="crew_and_effects">Экипаж и багаж</option><option value="other">Другое</option></select></label>
               <label>Масса, кг<input name={`mass_kg_${index}`} type="number" min="0.001" step="0.001" required /></label>
-              <label>Координата X, м<input name={`x_m_${index}`} type="number" step="0.001" required /></label>
-              <label>Координата Y, м<input name={`y_m_${index}`} type="number" step="0.001" required /></label>
-              <label>Координата Z, м<input name={`z_m_${index}`} type="number" step="0.001" required /></label>
-              <label>Источник координат<input name={`position_source_${index}`} required minLength={3} maxLength={500} placeholder="План размещения, шпангоут / отметка" /></label>
-              <label>Источник массы<input name={`source_reference_${index}`} required minLength={3} maxLength={500} placeholder="Грузовой манифест, накладная, ведомость" /></label>
+              {liquidKinds.has(itemKinds[index] ?? "cargo") ? <>
+                <label>Танк<select name={`tank_id_${index}`} required defaultValue=""><option value="">Выберите зарегистрированный танк</option>{tankOptions.filter(t => t.tank_type === itemKinds[index]).map(t => <option key={t.id} value={t.id}>{t.tank_code} — {t.name}</option>)}</select></label>
+                <p className="form-hint">Массу укажите по проверенному источнику. Приложение пока не пересчитывает замер в объём или массу.</p>
+              </> : <>
+                <label>Координата X, м<input name={`x_m_${index}`} type="number" step="0.001" required /></label>
+                <label>Координата Y, м<input name={`y_m_${index}`} type="number" step="0.001" required /></label>
+                <label>Координата Z, м<input name={`z_m_${index}`} type="number" step="0.001" required /></label>
+                <label>Источник координат<input name={`position_source_${index}`} required minLength={3} maxLength={500} placeholder="План размещения, шпангоут / отметка" /></label>
+              </>}
+              <label>Источник массы<input name={`source_reference_${index}`} required minLength={3} maxLength={500} placeholder="Манифест, ведомость, проверенный расчёт" /></label>
             </div>
             {itemRows.length > 1 && <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setItemRows(rows => rows.filter(row => row !== index))}>Удалить эту нагрузку</button></div>}
           </div>)}
-          <div className="form-actions"><button type="button" className="secondary-button" onClick={() => { setItemRows(rows => [...rows, nextItemRow]); setNextItemRow(value => value + 1); }}>＋ Добавить нагрузку</button></div>
+          <div className="form-actions"><button type="button" className="secondary-button" onClick={() => { setItemRows(rows => [...rows, nextItemRow]); setItemKinds(current => ({ ...current, [nextItemRow]: "cargo" })); setNextItemRow(value => value + 1); }}>＋ Добавить нагрузку</button></div>
         </div>
         <label className="notes-label">Примечание<textarea name="notes" maxLength={2000} rows={2} placeholder="Необязательное примечание" /></label>
         <div className="form-actions"><button className="primary-button" type="submit" disabled={busy || apiState !== "online" || !vesselId}>{busy ? "Сохранение…" : "Сохранить черновик"}</button></div>
