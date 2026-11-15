@@ -1,8 +1,5 @@
-"""Validated API schemas for vessel identity and reference conventions.
-
-These schemas intentionally do not provide default technical particulars.
-All dimensions and coordinate conventions must be supplied from vessel sources.
-"""
+"""Validated API schemas for vessel identity and reference conventions."""
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -41,10 +38,10 @@ class VesselCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     vessel_type: VesselType
-    loa_m: float = Field(gt=0, le=1000)
-    lbp_m: float = Field(gt=0, le=1000)
-    moulded_breadth_m: float = Field(gt=0, le=250)
-    moulded_depth_m: float = Field(gt=0, le=150)
+    loa_m: float = Field(gt=0, le=1000, allow_inf_nan=False)
+    lbp_m: float = Field(gt=0, le=1000, allow_inf_nan=False)
+    moulded_breadth_m: float = Field(gt=0, le=250, allow_inf_nan=False)
+    moulded_depth_m: float = Field(gt=0, le=150, allow_inf_nan=False)
     coordinate_convention: CoordinateConvention
 
     @model_validator(mode="after")
@@ -54,3 +51,18 @@ class VesselCreate(BaseModel):
         if self.moulded_breadth_m > self.loa_m:
             raise ValueError("Moulded breadth cannot exceed LOA")
         return self
+
+
+class VesselRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    vessel_type: VesselType
+    loa_m: float
+    lbp_m: float
+    moulded_breadth_m: float
+    moulded_depth_m: float
+    coordinate_convention: CoordinateConvention
+    data_status: str
+    created_at: datetime
