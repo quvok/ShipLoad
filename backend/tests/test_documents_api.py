@@ -281,3 +281,48 @@ def test_batch_candidate_approval_is_atomic_when_values_are_inconsistent():
     assert client.get(f"/api/v1/vessels/{vessel_id}/data-revisions").json() == []
     candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
     assert all(item["review_status"] == "PENDING" for item in candidates)
+
+
+def test_reviewed_duplicate_candidates_are_grouped_without_losing_audit_history():
+    vessel_id = client.post(
+        "/api/v1/vessels",
+        json={"name": "Duplicate evidence vessel", "vessel_type": "tanker"},
+    ).json()["id"]
+    document_id = "00000000-0000-0000-0000-000000000456"
+    session = TestingSession()
+    try:
+        session.add(SourceDocumentRecord(
+            id=document_id,
+            vessel_id=vessel_id,
+            original_filename="particulars.pdf",
+            stored_filename="duplicate-evidence.pdf",
+            media_type="application/pdf",
+            size_bytes=100,
+            sha256="c" * 64,
+            document_type="ship_particulars",
+            extraction_status="TEXT_EXTRACTED",
+            extracted_candidates=[
+                {"field": "lbp_m", "value": 283.1, "unit": "m", "page": page,
+                 "matched_text": f"LBP 283.1 m, page {page}", "status": "EXTRACTED"}
+                for page in (2, 139, 140)
+            ],
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+    for index in range(3):
+        response = client.post(
+            f"/api/v1/documents/{document_id}/candidates/{index}/decision",
+            json={"decision": "APPROVE", "reviewer_label": "Старший помощник"},
+        )
+        assert response.status_code == 201
+
+    candidates = client.get(f"/api/v1/documents/{document_id}/candidates").json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["candidate_indices"] == [0, 1, 2]
+    assert [source["page"] for source in candidates[0]["evidence"]] == [2, 139, 140]
+    assert candidates[0]["decision"]["revision_numbers"] == [1, 2, 3]
+
+    documents = client.get(f"/api/v1/vessels/{vessel_id}/documents").json()
+    assert documents[0]["candidate_count"] == 1
