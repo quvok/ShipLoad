@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 type NavKey = "overview" | "vessels" | "tanks" | "documents" | "loading" | "reports";
 type VesselType = "general_cargo" | "container" | "bulk_carrier" | "tanker" | "multipurpose" | "other";
 type Vessel = {
-  id: string; name: string; vessel_type: VesselType; loa_m: number; lbp_m: number;
-  moulded_breadth_m: number; moulded_depth_m: number; data_status: string; created_at: string;
+  id: string; name: string; vessel_type: VesselType; loa_m: number | null; lbp_m: number | null;
+  moulded_breadth_m: number | null; moulded_depth_m: number | null; data_status: string; created_at: string;
 };
 const navigation: { key: NavKey; label: string; icon: string }[] = [
   { key: "overview", label: "Обзор", icon: "◫" }, { key: "vessels", label: "Суда", icon: "▤" },
@@ -50,15 +50,6 @@ function App() {
     const payload = {
       name: String(form.get("name") ?? "").trim(),
       vessel_type: form.get("vessel_type"),
-      loa_m: Number(form.get("loa_m")), lbp_m: Number(form.get("lbp_m")),
-      moulded_breadth_m: Number(form.get("moulded_breadth_m")),
-      moulded_depth_m: Number(form.get("moulded_depth_m")),
-      coordinate_convention: {
-        origin_description: String(form.get("origin_description") ?? "").trim(),
-        x_axis_direction: form.get("x_axis_direction"), y_axis_direction: form.get("y_axis_direction"),
-        z_axis_direction: form.get("z_axis_direction"),
-        vertical_datum_description: String(form.get("vertical_datum_description") ?? "").trim(),
-      },
     };
     try {
       const response = await fetch(`${API}/vessels`, {
@@ -138,29 +129,17 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
     {success && <div className="inline-alert success">{success}</div>}{error && <div className="inline-alert error">{error}</div>}
     {showForm && <section className="panel vessel-form-panel"><div className="panel-heading"><div><div className="eyebrow">НОВАЯ ЗАПИСЬ</div><h2>Основные характеристики судна</h2></div></div>
       <form onSubmit={onSubmit}>
+        <p className="form-hint">Сначала создаётся пустой черновик. Размерения и система координат будут извлечены из загруженных судовых документов и появятся для проверки с указанием страниц и источников. Не вводите их вручную, если они есть в документации.</p>
         <div className="form-grid">
-          <label>Название судна<input name="name" required maxLength={120} placeholder="Например, название по судовым документам" /></label>
-          <label>Тип судна<select name="vessel_type" required defaultValue="general_cargo">{vesselTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
-          <label>Длина наибольшая (LOA), м<input name="loa_m" type="number" min="0.01" max="1000" step="0.001" required /></label>
-          <label>Длина между перпендикулярами (LBP), м<input name="lbp_m" type="number" min="0.01" max="1000" step="0.001" required /></label>
-          <label>Теоретическая ширина (B), м<input name="moulded_breadth_m" type="number" min="0.01" max="250" step="0.001" required /></label>
-          <label>Теоретическая высота борта (D), м<input name="moulded_depth_m" type="number" min="0.01" max="150" step="0.001" required /></label>
+          <label>Название судна<input name="name" required maxLength={120} placeholder="Можно указать временное название" /></label>
+          <label>Тип судна<select name="vessel_type" required defaultValue="other">{vesselTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
         </div>
-        <div className="form-subheading">Система координат и плоскости отсчёта</div>
-        <p className="form-hint">Выберите направления строго по принятой в документации системе координат. Не используйте значения по умолчанию без проверки.</p>
-        <div className="form-grid">
-          <label>Начало координат<input name="origin_description" required minLength={5} maxLength={500} placeholder="Точное описание точки начала координат" /></label>
-          <label>Вертикальная плоскость / datum<input name="vertical_datum_description" required minLength={3} maxLength={500} placeholder="Например, baseline — если так указано в документации" /></label>
-          <AxisSelect name="x_axis_direction" label="Направление оси X" options={[["positive_forward","Вперёд"],["positive_aft","В корму"]]} />
-          <AxisSelect name="y_axis_direction" label="Направление оси Y" options={[["positive_port","На левый борт"],["positive_starboard","На правый борт"]]} />
-          <AxisSelect name="z_axis_direction" label="Направление оси Z" options={[["positive_up","Вверх"],["positive_down","Вниз"]]} />
-        </div>
-        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={loading || apiState !== "online"}>{loading ? "Сохранение…" : "Сохранить черновик"}</button></div>
+        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={loading || apiState !== "online"}>{loading ? "Создание…" : "Создать черновик и перейти к документам"}</button></div>
       </form>
     </section>}
     <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ЛОКАЛЬНАЯ БАЗА ДАННЫХ</div><h2>Зарегистрированные суда</h2></div><button className="secondary-button" onClick={onRefresh}>Обновить</button></div>
       {vessels.length === 0 ? <div className="empty-state"><div className="empty-icon">▤</div><strong>Список судов пуст</strong><p>Создайте первый профиль. Запись будет сохранена в локальной SQLite-базе backend.</p></div> :
-        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Тип</th><th>LOA × B, м</th><th>LBP, м</th><th>Статус данных</th></tr></thead><tbody>{vessels.map((vessel) => <tr key={vessel.id}><td><strong>{vessel.name}</strong><small>{vessel.id}</small></td><td>{vesselTypes.find((type) => type.value === vessel.vessel_type)?.label ?? vessel.vessel_type}</td><td>{vessel.loa_m} × {vessel.moulded_breadth_m}</td><td>{vessel.lbp_m}</td><td><span className="draft-tag">{vessel.data_status}</span></td></tr>)}</tbody></table></div>}
+        <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Название</th><th>Тип</th><th>LOA × B, м</th><th>LBP, м</th><th>Статус данных</th></tr></thead><tbody>{vessels.map((vessel) => <tr key={vessel.id}><td><strong>{vessel.name}</strong><small>{vessel.id}</small></td><td>{vesselTypes.find((type) => type.value === vessel.vessel_type)?.label ?? vessel.vessel_type}</td><td>{vessel.loa_m ?? "—"} × {vessel.moulded_breadth_m ?? "—"}</td><td>{vessel.lbp_m ?? "—"}</td><td><span className="draft-tag">{vessel.data_status}</span></td></tr>)}</tbody></table></div>}
     </section>
   </>;
 }
