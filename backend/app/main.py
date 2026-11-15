@@ -317,6 +317,9 @@ def get_document_extraction_report(
                 for index, page in enumerate(reader.pages)
             ]
         report = build_extraction_report(pages)
+        # Table extraction is limited to pages whose text suggests technical tables.
+        # It does not approve or normalize any cell values.
+        report["table_analysis"] = extract_pdf_tables(storage_path, pages)
     except HTTPException:
         raise
     except Exception as exc:
