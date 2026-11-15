@@ -139,7 +139,8 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
         sections[key] = {
             "label": _SECTION_LABELS[key],
             "status": (
-                "TEXT_EVIDENCE_FOUND" if evidence
+                "TEXT_EVIDENCE_FOUND_WITH_OCR_GAPS" if evidence and empty_pages
+                else "TEXT_EVIDENCE_FOUND" if evidence
                 else "OCR_REQUIRED" if empty_pages
                 else "NOT_FOUND_IN_EXTRACTED_TEXT"
             ),
