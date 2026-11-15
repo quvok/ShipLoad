@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, sta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from pypdf import PdfReader
+from pypdf import PdfReader, apply_configuration
 from pypdf.errors import LimitReachedError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -170,7 +170,13 @@ async def upload_vessel_document(
                     status_code=422,
                     detail="PDF защищён паролем. Снимите защиту и загрузите документ повторно.",
                 )
-        pages = [(index + 1, page.extract_text() or "") for index, page in enumerate(reader.pages)]
+        # Some ship stability PDFs contain unusually complex vector content streams.
+        # Raise only the per-stream parsing-work budget, keeping it finite.
+        with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
+            pages = [
+                (index + 1, page.extract_text() or "")
+                for index, page in enumerate(reader.pages)
+            ]
         if not pages:
             raise HTTPException(status_code=422, detail="PDF не содержит страниц")
     except HTTPException:
