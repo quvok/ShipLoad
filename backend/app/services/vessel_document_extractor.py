@@ -20,22 +20,22 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
     "loa_m": re.compile(
         r"\b(?:LOA|L\.?O\.?A\.?|length\s+overall)\b[^\d\n]{0,50}"
         r"(\d{1,4}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
-        re.IGNORECASE,
+        re.IGNORECASEGNORECASE,
     ),
     "lbp_m": re.compile(
         r"\b(?:LBP|L\.?B\.?P\.?|length\s+between\s+perpendiculars)\b[^\d\n]{0,60}"
         r"(\d{1,4}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
-        re.IGNORECASE,
+        re.IGNORECASEGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
         r"\b(?:(?:moulded|molded)\s+breadth|(?:moulded|molded)\s+beam|breadth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
-        re.IGNORECASE,
+        re.IGNORECASEGNORECASE,
     ),
     "moulded_depth_m": re.compile(
         r"\b(?:(?:moulded|molded)\s+depth|depth\s*\(\s*(?:moulded|molded)\s*\))[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
-        re.IGNORECASE,
+        re.IGNORECASEGNORECASE,
     ),
 }
 
@@ -116,11 +116,11 @@ def _is_relevant_match(term: str, line: str) -> bool:
     """Filter ambiguous abbreviations unless their technical context is explicit."""
     lowered = line.casefold()
     if term.casefold() == "km":
-        return bool(re.search(r"\bKM\s*(?:=|:)?\s*\d", line, re.IGNORECASE)) or (
-            "hydrostatic" in lowered and bool(re.search(r"\bKM\b", line, re.IGNORECASE))
+        return bool(re.search(r"\bKM\s*(?:=|:)?\s*\d", line, re.IGNORECASEGNORECASE)) or (
+            "hydrostatic" in lowered and bool(re.search(r"\bKM\b", line, re.IGNORECASEGNORECASE))
         )
     if term.casefold() in {"tpc", "mct", "lcb", "lcf", "kb", "fsm", "kg", "gm"}:
-        return bool(re.search(r"\b" + re.escape(term) + r"\b", line, re.IGNORECASE))
+        return bool(re.search(r"\b" + re.escape(term) + r"\b", line, re.IGNORECASEGNORECASE))
     return True
 
 
