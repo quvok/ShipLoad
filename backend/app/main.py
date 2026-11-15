@@ -19,8 +19,8 @@ from app.models import (
     LoadingConditionRecord,
     LoadingItemRecord,
     SourceDocumentRecord,
-    VesselDataRevisionRecord,
     TankRecord,
+    VesselDataRevisionRecord,
     VesselRecord,
 )
 from app.schemas.loading import LoadingConditionCreate
