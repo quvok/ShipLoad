@@ -15,7 +15,7 @@ class ExtractedCandidate:
     status: str = "EXTRACTED"
 
 
-# Deliberately require an explicit metre unit. Bare numbers are too ambiguous.
+# Require an explicit metre unit. Bare numbers are too ambiguous.
 _PATTERNS: dict[str, re.Pattern[str]] = {
     "loa_m": re.compile(
         r"\b(?:LOA|L\.?O\.?A\.?|length\s+overall)\b[^\d\n]{0,50}"
@@ -28,12 +28,12 @@ _PATTERNS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "moulded_breadth_m": re.compile(
-        r"\b(?:moulded\s+breadth|moulded\s+beam|breadth)\b[^\d\n]{0,50}"
+        r"\b(?:moulded\s+breadth|moulded\s+beam|breadth\s*\(\s*moulded\s*\))\b[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
     "moulded_depth_m": re.compile(
-        r"\b(?:moulded\s+depth|depth)\b[^\d\n]{0,50}"
+        r"\b(?:moulded\s+depth|depth\s*\(\s*moulded\s*\))\b[^\d\n]{0,50}"
         r"(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:m|metres?|meters?)\b",
         re.IGNORECASE,
     ),
@@ -58,35 +58,39 @@ def extract_principal_particulars(pages: list[tuple[int, str]]) -> list[dict[str
 
 _REPORT_SECTIONS: dict[str, tuple[str, ...]] = {
     "principal_particulars": (
-        "LOA", "LBP", "length overall", "breadth", "moulded depth",
-        "deadweight", "DWT", "displacement", "lightship",
+        "LOA", "LBP", "length overall", "length between perpendiculars",
+        "breadth (molded)", "breadth (moulded)", "moulded breadth",
+        "moulded depth", "deadweight", "DWT", "displacement", "lightship",
     ),
     "coordinate_system": (
-        "AP", "FP", "aft perpendicular", "forward perpendicular",
+        "aft perpendicular", "forward perpendicular", "from AP",
         "baseline", "base line", "datum", "coordinate", "co-ordinate",
-        "origin", "x-axis", "y-axis", "z-axis",
+        "origin", "x-axis", "y-axis", "z-axis", "positive X", "positive Y",
+        "positive Z",
     ),
     "tanks_and_capacities": (
-        "tank", "capacity plan", "tank plan", "ballast tank", "cargo tank",
-        "slop tank", "bunker tank", "fresh water tank", "sounding",
-        "ullage", "calibration table", "tank capacity",
+        "cargo tank", "ballast tank", "slop tank", "bunker tank",
+        "fresh water tank", "fuel oil tank", "tank capacity", "capacity plan",
+        "tank plan", "sounding table", "ullage table", "calibration table",
+        "tank calibration",
     ),
     "hydrostatics": (
         "hydrostatic", "displacement table", "TPC", "MCT", "LCB",
-        "LCF", "KM", "KB", "waterplane", "draft",
+        "LCF", "KB", "waterplane", "hydrostatic particulars",
     ),
     "stability_data": (
-        "stability", "GZ curve", "righting lever", "KN curve",
-        "free surface", "FSM", "KG", "GM", "cross curve",
+        "stability criteria", "intact stability", "GZ curve", "righting lever",
+        "KN curve", "free surface", "FSM", "KG", "VCG", "GM", "cross curve",
     ),
     "loading_limits_and_conditions": (
         "loading manual", "loading condition", "maximum permissible",
-        "limiting", "shear force", "bending moment", "strength",
-        "loading restriction", "operating condition",
+        "limiting", "shear force", "bending moment", "still water",
+        "loading restriction", "operating condition", "scantling draft",
+        "design draft", "deadweight",
     ),
     "cargo_and_ballast_systems": (
         "cargo system", "ballast system", "cargo pump", "ballast pump",
-        "cargo piping", "manifold", "cargo handling",
+        "cargo piping", "cargo manifold", "ballast manifold", "cargo handling",
     ),
 }
 
@@ -108,13 +112,35 @@ def _term_matches_line(term: str, lowered_line: str) -> bool:
     return normalized in lowered_line
 
 
-def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
-    """Build a document-wide evidence inventory without inferring missing values.
+def _is_relevant_match(term: str, line: str) -> bool:
+    """Filter ambiguous abbreviations unless their technical context is explicit."""
+    lowered = line.casefold()
+    if term.casefold() == "km":
+        return bool(re.search(r"\bKM\s*(?:=|:)?\s*\d", line, re.I)) or (
+            "hydrostatic" in lowered and bool(re.search(r"\bKM\b", line, re.I))
+        )
+    if term.casefold() in {"tpc", "mct", "lcb", "lcf", "kb", "fsm", "kg", "gm"}:
+        return bool(re.search(r"\b" + re.escape(term) + r"\b", line, re.I))
+    return True
 
-    This first-stage report indexes text evidence by page. It deliberately does
-    not claim that a keyword hit is a validated parameter or that no text hit
-    proves the information is absent from diagrams or scanned images.
-    """
+
+def _page_category(text: str) -> str:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("capacity plan", "tank plan", "cargo tank", "ballast tank")):
+        return "tank_or_arrangement"
+    if any(token in lowered for token in ("hydrostatic", "l.c.f", "l.c.b", "tpc", "mct")):
+        return "hydrostatic_table_candidate"
+    if any(token in lowered for token in ("gz curve", "righting lever", "stability criteria", "free surface")):
+        return "stability_data"
+    if any(token in lowered for token in ("shear force", "bending moment", "still water")):
+        return "strength_data"
+    if any(token in lowered for token in ("loading condition", "deadweight", "displacement")):
+        return "loading_data"
+    return "text_content"
+
+
+def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
+    """Build a document-wide evidence inventory without inferring missing values."""
     text_pages = [(number, text) for number, text in pages if text.strip()]
     empty_pages = [number for number, text in pages if not text.strip()]
     sections: dict[str, object] = {}
@@ -125,8 +151,10 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
         for page_number, page_text in text_pages:
             lines = [line.strip() for line in page_text.splitlines() if line.strip()]
             for line in lines:
-                lowered = line.casefold()
-                matched = [term for term in terms if _term_matches_line(term, lowered)]
+                matched = [
+                    term for term in terms
+                    if _term_matches_line(term, line.casefold()) and _is_relevant_match(term, line)
+                ]
                 if not matched:
                     continue
                 identity = (page_number, line[:300])
@@ -137,6 +165,7 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
                     "page": page_number,
                     "matched_terms": matched[:5],
                     "excerpt": line[:500],
+                    "page_category": _page_category(page_text),
                 })
                 if len(evidence) >= 30:
                     break
@@ -145,33 +174,33 @@ def build_extraction_report(pages: list[tuple[int, str]]) -> dict[str, object]:
 
         sections[key] = {
             "label": _SECTION_LABELS[key],
-            "status": (
-                "TEXT_EVIDENCE_FOUND_WITH_OCR_GAPS" if evidence and empty_pages
-                else "TEXT_EVIDENCE_FOUND" if evidence
-                else "OCR_REQUIRED" if empty_pages
-                else "NOT_FOUND_IN_EXTRACTED_TEXT"
-            ),
+            "status": "TEXT_EVIDENCE_FOUND" if evidence else "NOT_FOUND_IN_EXTRACTED_TEXT",
             "evidence_count": len(evidence),
             "evidence": evidence,
             "note": (
-                "Найдены текстовые совпадения; это ещё не подтверждённые параметры."
+                "Найдены текстовые указатели. Они не являются утверждёнными параметрами."
                 if evidence else
                 "Совпадения в текстовом слое не найдены. Это не доказывает отсутствие данных на схемах или изображениях."
             ),
         }
 
     return {
-        "report_version": 1,
-        "analysis_scope": "PDF text layer; image and diagram understanding is not yet included",
+        "report_version": 2,
+        "analysis_scope": "PDF text layer; table extraction is a separate bounded pass; image OCR is not included",
         "page_count": len(pages),
         "pages_with_text": len(text_pages),
         "pages_without_text": empty_pages,
+        "pages": [
+            {"page": number, "category": _page_category(text), "has_text": bool(text.strip())}
+            for number, text in pages
+        ],
         "sections": sections,
         "limitations": [
-            "Ключевые слова и фрагменты являются указателями для проверки, а не утверждёнными данными.",
-            "Схемы, растровые изображения и графики пока не распознаются этим этапом.",
+            "Совпадения и табличные фрагменты являются указателями для проверки, а не утверждёнными данными.",
+            "Схемы, растровые изображения и графики пока не распознаются; для них нужен отдельный OCR / vision этап.",
+            "Страница без текстового слоя помечается отдельно; это не означает, что весь раздел требует OCR.",
             "Отсутствие текстового совпадения не означает, что сведения отсутствуют в исходном документе.",
-            "Все числовые значения должны сохранять единицы, контекст, страницу и проверку человеком.",
+            "Числовые значения нельзя использовать без проверки единиц, контекста, datum и исходной страницы.",
         ],
     }
 
