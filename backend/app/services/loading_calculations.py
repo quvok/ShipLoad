@@ -63,7 +63,7 @@ def interpolate_hydrostatics(
     if len(table) < 2:
         raise CalculationInputError("At least two hydrostatic rows are required")
     rows = sorted(table, key=lambda row: row.displacement_volume_m3)
-    for row in rows:
+    for index, row in enumerate(rows):
         _finite_positive(row.displacement_volume_m3, "hydrostatic displacement volume")
         _finite_positive(row.mct_t_m_per_cm, "MCT")
         if not all(math.isfinite(value) for value in (
@@ -73,18 +73,23 @@ def interpolate_hydrostatics(
             row.transverse_metacentre_z_m,
         )):
             raise CalculationInputError("Hydrostatic table contains a non-finite value")
+        if index and row.displacement_volume_m3 <= rows[index - 1].displacement_volume_m3:
+            raise CalculationInputError("Hydrostatic displacement rows must be strictly increasing")
     if displacement_volume_m3 < rows[0].displacement_volume_m3 or displacement_volume_m3 > rows[-1].displacement_volume_m3:
         raise CalculationInputError("Displacement is outside hydrostatic table; extrapolation is prohibited")
     for row in rows:
         if math.isclose(displacement_volume_m3, row.displacement_volume_m3, rel_tol=0, abs_tol=1e-9):
             return row
-    lower = next(
-        (left for left, right in zip(rows, rows[1:]) if left.displacement_volume_m3 < displacement_volume_m3 < right.displacement_volume_m3),
+    lower_index = next(
+        (index for index in range(len(rows) - 1)
+         if rows[index].displacement_volume_m3 < displacement_volume_m3
+         < rows[index + 1].displacement_volume_m3),
         None,
     )
-    if lower is None:
+    if lower_index is None:
         raise CalculationInputError("Could not bracket displacement in hydrostatic table")
-    upper = rows[rows.index(lower) + 1]
+    lower = rows[lower_index]
+    upper = rows[lower_index + 1]
     ratio = (
         (displacement_volume_m3 - lower.displacement_volume_m3)
         / (upper.displacement_volume_m3 - lower.displacement_volume_m3)
