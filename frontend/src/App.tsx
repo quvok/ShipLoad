@@ -162,7 +162,7 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
   </>;
 }
 
-type LoadingSummary = { id: string; name: string; status: string; item_count: number; created_at: string };
+type LoadingSummary = { id: string; name: string; vessel_data_revision: string; status: string; item_count: number; created_at: string };
 function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "checking" | "online" | "offline" }) {
   const [vesselId, setVesselId] = useState("");
   const [records, setRecords] = useState<LoadingSummary[]>([]);
