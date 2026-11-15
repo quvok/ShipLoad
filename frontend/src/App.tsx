@@ -60,7 +60,7 @@ function App() {
         const detail = body?.detail;
         throw new Error(typeof detail === "string" ? detail : "Проверьте введённые данные. Сервер отклонил запрос.");
       }
-      await loadVessels(); setShowForm(false); setSuccess("Профиль судна сохранён в локальной базе данных.");
+      await loadVessels(); setShowForm(false); setActive("documents"); setSuccess("Черновик создан. Теперь загрузите судовую документацию.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Ошибка при сохранении судна.");
     } finally { setLoading(false); }
@@ -134,7 +134,7 @@ function VesselsPage({ vessels, apiState, showForm, setShowForm, onSubmit, loadi
           <label>Название судна<input name="name" required maxLength={120} placeholder="Можно указать временное название" /></label>
           <label>Тип судна<select name="vessel_type" required defaultValue="other">{vesselTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
         </div>
-        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={loading || apiState !== "online"}>{loading ? "Создание…" : "Создать черновик и перейти к документам"}</button></div>
+        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Отмена</button><button className="primary-button" type="submit" disabled={loading || apiState !== "online"}>{loading ? "Создание…" : "Создать пустой черновик"}</button></div>
       </form>
     </section>}
     <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">ЛОКАЛЬНАЯ БАЗА ДАННЫХ</div><h2>Зарегистрированные суда</h2></div><button className="secondary-button" onClick={onRefresh}>Обновить</button></div>
@@ -237,7 +237,7 @@ function DocumentsPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "ch
       {!vesselId ? <div className="empty-state">Сначала выберите судно.</div> : documents.length === 0 ? <div className="empty-state">Для выбранного судна документы ещё не загружены.</div> :
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Файл</th><th>Тип</th><th>Объём</th><th>Извлечение</th><th>Кандидаты</th></tr></thead><tbody>{documents.map(doc => <tr key={doc.id} onClick={() => setSelectedDocument(doc.id)} className={selectedDocument === doc.id ? "selected-row" : ""}><td><strong>{doc.original_filename}</strong><small>SHA-256: {doc.sha256.slice(0,16)}…</small></td><td>{documentTypes.find(([value]) => value === doc.document_type)?.[1] ?? doc.document_type}</td><td>{(doc.size_bytes / 1024).toFixed(1)} КБ</td><td>{doc.extraction_status}</td><td>{doc.candidate_count}</td></tr>)}</tbody></table></div>}
     </section>
-    {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
+    {selected && <section className="panel vessel-list"><div className="panel-heading"><div><div className="eyebrow">РЕЗУЛЬТАТ ИЗВЛЕЧЕНИЯ</div><h2>{selected.original_filename}</h2><a className="help-button" href={`${API}/documents/${encodeURIComponent(selected.id)}/file`} target="_blank" rel="noreferrer">Открыть оригинал ↗</a></div><span className="draft-tag">ТРЕБУЕТ СВЕРКИ</span></div>
       {candidates.length === 0 ? <div className="empty-state">{selected.extraction_status === "OCR_REQUIRED" ? "В документе не найден текстовый слой. Для него потребуется OCR." : "Кандидаты характеристик не обнаружены. Проверьте документ вручную."}</div> :
         <div className="vessel-table-wrap"><table className="vessel-table"><thead><tr><th>Параметр</th><th>Найденное значение</th><th>Страница</th><th>Фрагмент источника</th><th>Статус</th></tr></thead><tbody>{candidates.map((item,index) => <tr key={index}><td>{candidateLabels[item.field] ?? item.field}</td><td><strong>{item.value} {item.unit}</strong></td><td>{item.page}</td><td>{item.matched_text}</td><td>{item.status}</td></tr>)}</tbody></table></div>}
       <p className="form-hint">Сейчас значения только отображаются для сверки. Они не переносятся в профиль и не используются в расчётах.</p>
