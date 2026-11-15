@@ -29,7 +29,7 @@ from app.models import (
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
-from app.services.vessel_document_extractor import extract_principal_particulars
+from app.services.vessel_document_extractor import (\n    build_extraction_report,\n    extract_principal_particulars,\n)
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +282,52 @@ def download_source_document(
         filename=record.original_filename,
         content_disposition_type="inline",
     )
+
+
+@app.get(
+    "/api/v1/documents/{document_id}/report",
+    tags=["documents"],
+)
+def get_document_extraction_report(
+    document_id: str,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, object]:
+    """Rebuild the full-document evidence inventory from the immutable PDF original."""
+    record = session.get(SourceDocumentRecord, document_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    storage_path = (_DOCUMENT_STORAGE / record.stored_filename).resolve()
+    if storage_path.parent != _DOCUMENT_STORAGE.resolve() or not storage_path.is_file():
+        raise HTTPException(status_code=404, detail="Оригинал документа недоступен")
+    try:
+        reader = PdfReader(str(storage_path), strict=False)
+        if reader.is_encrypted:
+            try:
+                decrypted = reader.decrypt("")
+            except (ValueError, TypeError, NotImplementedError):
+                decrypted = 0
+            if not decrypted:
+                raise HTTPException(status_code=422, detail="PDF защищён паролем")
+        with apply_configuration(stream_parsing_work_maximum_count=10_000_000):
+            pages = [
+                (index + 1, page.extract_text() or "")
+                for index, page in enumerate(reader.pages)
+            ]
+        report = build_extraction_report(pages)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to build extraction report for document %s", document_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Не удалось повторно проанализировать PDF ({type(exc).__name__}: {exc}).",
+        ) from exc
+    return {
+        "document_id": record.id,
+        "filename": record.original_filename,
+        "sha256": record.sha256,
+        "report": report,
+    }
 
 
 class CandidateDecisionRequest(BaseModel):
