@@ -61,12 +61,12 @@ def create_vessel(
 
 
 @app.get("/api/v1/vessels", response_model=list[VesselRead], tags=["vessels"])
-def list_vessels(session: Session = Depends(get_session)) -> list[VesselRecord]:
+def list_vessels(session: Annotated[Session, Depends(get_session)]) -> list[VesselRecord]:
     return list(session.scalars(select(VesselRecord).order_by(VesselRecord.created_at.desc())))
 
 
 @app.get("/api/v1/vessels/{vessel_id}", response_model=VesselRead, tags=["vessels"])
-def get_vessel(vessel_id: str, session: Session = Depends(get_session)) -> VesselRecord:
+def get_vessel(vessel_id: str, session: Annotated[Session, Depends(get_session)]) -> VesselRecord:
     record = session.get(VesselRecord, vessel_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Судно не найдено")
