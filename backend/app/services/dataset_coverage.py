@@ -40,11 +40,13 @@ _DATASETS: dict[str, dict[str, Any]] = {
     "longitudinal_strength": {
         "label": "Продольная прочность",
         "text_section": "loading_limits_and_conditions",
+        "text_terms": ("shear force", "bending moment", "still water"),
         "table_kinds": ("strength",),
     },
     "loading_conditions": {
         "label": "Загрузочные условия и ограничения",
         "text_section": "loading_limits_and_conditions",
+        "text_terms": ("loading manual", "loading condition", "operating condition", "deadweight"),
         "table_kinds": ("loading_condition",),
     },
 }
@@ -69,6 +71,17 @@ def build_dataset_coverage(
     for key, definition in _DATASETS.items():
         section = sections.get(definition["text_section"], {})
         text_evidence = section.get("evidence", []) if isinstance(section, Mapping) else []
+        text_terms = definition.get("text_terms")
+        if text_terms:
+            text_evidence = [
+                item for item in text_evidence
+                if isinstance(item, Mapping)
+                and any(
+                    term in str(matched).casefold()
+                    for matched in item.get("matched_terms", [])
+                    for term in text_terms
+                )
+            ]
         table_evidence = [
             item
             for kind in definition["table_kinds"]
@@ -86,7 +99,12 @@ def build_dataset_coverage(
             status = "TABLE_EVIDENCE_REVIEW_REQUIRED"
         elif text_evidence:
             status = "TEXT_EVIDENCE_REVIEW_REQUIRED"
-        elif table_report.get("status") == "TABLE_EXTRACTION_FAILED":
+        elif (
+            table_report.get("status") == "TABLE_EXTRACTION_FAILED"
+            or table_report.get("pages_skipped_complex")
+            or table_report.get("pages_skipped_by_limit")
+            or table_report.get("page_errors")
+        ):
             status = "EXTRACTION_INCOMPLETE"
         else:
             status = "NO_EVIDENCE_FOUND_NOT_PROVEN_ABSENT"
