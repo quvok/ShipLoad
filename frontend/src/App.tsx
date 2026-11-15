@@ -44,7 +44,7 @@ function App() {
 
   async function createVessel(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;\n    const form = new FormData(formElement);
     const payload = {
       name: String(form.get("name") ?? "").trim(),
       vessel_type: form.get("vessel_type"),
@@ -212,7 +212,7 @@ function LoadingPage({ vessels, apiState }: { vessels: Vessel[]; apiState: "chec
       setNotice("Загрузочное условие сохранено как REVIEW_REQUIRED. Расчёты не выполнялись.");
       const refreshed = await fetch(`${API}/vessels/${encodeURIComponent(vesselId)}/loading-conditions`);
       if (refreshed.ok) setRecords(await refreshed.json() as LoadingSummary[]);
-      (event.currentTarget as HTMLFormElement).reset();
+      formElement.reset();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось сохранить запись.");
     } finally { setBusy(false); }
