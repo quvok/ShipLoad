@@ -18,10 +18,10 @@ from app.models import (
     TankRecord,
     VesselRecord,
 )
-from app.services.vessel_document_extractor import extract_principal_particulars
 from app.schemas.loading import LoadingConditionCreate
 from app.schemas.tank import TankCreate, TankRead
 from app.schemas.vessel import VesselCreate, VesselRead
+from app.services.vessel_document_extractor import extract_principal_particulars
 
 app = FastAPI(
     title="ShipLoad API",
