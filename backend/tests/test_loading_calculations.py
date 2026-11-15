@@ -127,8 +127,8 @@ def test_non_positive_corrected_gm_is_rejected():
 def test_forward_longitudinal_moment_adds_only_loads_forward_of_midship():
     lightship = Lightship(1000.0, 50.0, 0.0, 10.0, 1_386_360.0)
     hydro = [
-        HydrostaticPoint(100.0, 5.0, 40.0, 50.0, 20.0, 100.0),
-        HydrostaticPoint(200.0, 6.0, 40.0, 50.0, 20.0, 100.0),
+        HydrostaticPoint(1000.0, 5.0, 40.0, 50.0, 20.0, 100.0),
+        HydrostaticPoint(1200.0, 6.0, 40.0, 50.0, 20.0, 100.0),
     ]
     result = calculate_loading_condition(
         lightship=lightship,
